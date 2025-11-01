@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4><i class="fas fa-network-wired"></i> Network Nodes</h4>
+                <button id="refreshNodes" class="btn btn-sm btn-primary">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <i class="fas fa-sync-alt"></i> Node discovery is automatic. The system will find other nodes on the LAN.
+                    <span id="lastUpdated" class="float-end"></span>
+                </div>
+                
+                <div id="nodesContainer">
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading nodes...</span>
+                        </div>
+                        <p class="mt-2">Discovering nodes on the network...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5><i class="fas fa-chart-line"></i> Network Statistics</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <canvas id="loadChart" width="400" height="200"></canvas>
+                    </div>
+                    <div class="col-md-6">
+                        <canvas id="capabilityChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+                
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6>Network Status</h6>
+                                <div id="networkStats">
+                                    <div class="spinner-border spinner-border-sm" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    Loading network status...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6>This Node</h6>
+                                <div id="thisNodeInfo">
+                                    <div class="spinner-border spinner-border-sm" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    Loading node information...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let loadChart, capabilityChart;
+let autoRefresh = true;
+
+// Load nodes function
+async function loadNodes() {
+    try {
+        const response = await fetch('/api/nodes');
+        const data = await response.json();
+        
+        const container = document.getElementById('nodesContainer');
+        const lastUpdated = document.getElementById('lastUpdated');
+        
+        // Update last updated time
+        lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+        
+        if (!data.nodes || data.nodes.length === 0) {
+            container.innerHTML = `
+                <div class="alert alert-warning text-center">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h5>No Nodes Found</h5>
+                    <p>No other nodes discovered on the network yet.</p>
+                    <small class="text-muted">
+                        Make sure other computers are running the application on the same network.
+                    </small>
+                </div>
+            `;
+            updateCharts([]);
+            updateNetworkStats({});
+            return;
+        }
+        
+        let html = '';
+        
+        // Sort nodes: current node first, then by ID
+        const sortedNodes = data.nodes.sort((a, b) => {
+            if (a.is_self) return -1;
+            if (b.is_self) return 1;
+            return a.id.localeCompare(b.id);
+        });
+        
+        sortedNodes.forEach(node => {
+            const isLeader = node.is_leader;
+            const isSelf = node.is_self;
+            const lastSeen = new Date(node.last_seen * 1000);
+            const timeAgo = getTimeAgo(node.last_seen);
+            
+            html += `
+                <div class="card mb-3 ${isSelf ? 'border-primary' : ''} ${isLeader ? 'border-success' : ''}">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="flex-grow-1">
+                                <h5 class="card-title">
+                                    ${node.id} 
+                                    ${isSelf ? '<span class="badge bg-primary">This Node</span>' : ''}
+                                    ${isLeader ? '<span class="badge bg-success">Leader</span>' : ''}
+                                    ${!isSelf && !isLeader ? '<span class="badge bg-secondary">Peer</span>' : ''}
+                                </h5>
+                                <p class="card-text mb-1">
+                                    <strong>IP:</strong> ${node.ip}<br>
+                                    <strong>Last Seen:</strong> ${timeAgo} (${lastSeen.toLocaleString()})<br>
+                                    <strong>Current Load:</strong> ${node.load} tasks
+                                </p>
+                                <div class="mt-2">
+                                    ${node.capabilities.ocr ? '<span class="badge bg-info me-1">OCR</span>' : ''}
+                                    ${node.capabilities.nlp ? '<span class="badge bg-success me-1">NLP</span>' : ''}
+                                    ${node.capabilities.text_extraction ? '<span class="badge bg-warning me-1">Text Extraction</span>' : ''}
+                                    ${node.capabilities.file_processing ? '<span class="badge bg-secondary me-1">File Processing</span>' : ''}
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                <div class="progress mb-2" style="width: 100px; height: 10px;">
+                                    <div class="progress-bar ${node.load > 5 ? 'bg-warning' : 'bg-success'}" 
+                                         role="progressbar" style="width: ${Math.min(node.load * 20, 100)}%">
+                                    </div>
+                                </div>
+                                <small>Load: ${node.load}</small>
+                                <div class="mt-2">
+                                    <span class="badge ${isSelf ? 'bg-primary' : 'bg-success'}">
+                                        ${isSelf ? 'Local' : 'Active'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+        updateCharts(data.nodes);
+        updateNetworkStats(data);
+        
+    } catch (error) {
+        console.error('Error loading nodes:', error);
+        document.getElementById('nodesContainer').innerHTML = 
+            '<div class="alert alert-danger">Error loading node information. Check console for details.</div>';
+    }
+}
+
+function updateCharts(nodes) {
+    // Update load distribution chart
+    const loadCtx = document.getElementById('loadChart').getContext('2d');
+    const loadLabels = nodes.map(node => {
+        const shortId = node.id.length > 12 ? node.id.substring(0, 12) + '...' : node.id;
+        return node.is_self ? `${shortId} (You)` : shortId;
+    });
+    const loadData = nodes.map(node => node.load);
+    
+    if (loadChart) {
+        loadChart.destroy();
+    }
+    
+    loadChart = new Chart(loadCtx, {
+        type: 'bar',
+        data: {
+            labels: loadLabels,
+            datasets: [{
+                label: 'Task Load',
+                data: loadData,
+                backgroundColor: loadData.map((load, index) => 
+                    nodes[index].is_self ? '#007bff' : (load > 5 ? '#ffc107' : '#28a745')
+                )
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Node Load Distribution'
+                },
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Number of Tasks'
+                    }
+                }
+            }
+        }
+    });
+    
+    // Update capabilities chart
+    const capCtx = document.getElementById('capabilityChart').getContext('2d');
+    const capabilities = ['ocr', 'nlp', 'text_extraction', 'file_processing'];
+    const capData = capabilities.map(cap => 
+        nodes.filter(node => node.capabilities[cap]).length
+    );
+    
+    if (capabilityChart) {
+        capabilityChart.destroy();
+    }
+    
+    capabilityChart = new Chart(capCtx, {
+        type: 'pie',
+        data: {
+            labels: ['OCR', 'NLP', 'Text Extraction', 'File Processing'],
+            datasets: [{
+                data: capData,
+                backgroundColor: ['#007bff', '#28a745', '#ffc107', '#6c757d']
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Network Capabilities Distribution'
+                }
+            }
+        }
+    });
+}
+
+function updateNetworkStats(data) {
+    const networkStats = document.getElementById('networkStats');
+    const thisNodeInfo = document.getElementById('thisNodeInfo');
+    
+    if (data.nodes && data.nodes.length > 0) {
+        const totalNodes = data.nodes.length;
+        const peerNodes = data.nodes.filter(node => !node.is_self).length;
+        const leaderNode = data.nodes.find(node => node.is_leader);
+        
+        networkStats.innerHTML = `
+            <p><strong>Total Nodes:</strong> ${totalNodes}</p>
+            <p><strong>Peer Nodes:</strong> ${peerNodes}</p>
+            <p><strong>Leader:</strong> ${leaderNode ? leaderNode.id : 'None'}</p>
+            <p><strong>Network Status:</strong> <span class="badge bg-success">Active</span></p>
+        `;
+        
+        const thisNode = data.nodes.find(node => node.is_self);
+        if (thisNode) {
+            thisNodeInfo.innerHTML = `
+                <p><strong>ID:</strong> ${thisNode.id}</p>
+                <p><strong>IP:</strong> ${thisNode.ip}</p>
+                <p><strong>Status:</strong> <span class="badge bg-success">Online</span></p>
+                <p><strong>Load:</strong> ${thisNode.load} tasks</p>
+                <div class="mt-2">
+                    ${thisNode.capabilities.ocr ? '<span class="badge bg-info me-1">OCR</span>' : ''}
+                    ${thisNode.capabilities.nlp ? '<span class="badge bg-success me-1">NLP</span>' : ''}
+                    ${thisNode.capabilities.text_extraction ? '<span class="badge bg-warning me-1">Text</span>' : ''}
+                    ${thisNode.capabilities.file_processing ? '<span class="badge bg-secondary me-1">Files</span>' : ''}
+                </div>
+            `;
+        }
+    }
+}
+
+function getTimeAgo(timestamp) {
+    const now = Date.now() / 1000;
+    const diff = now - timestamp;
+    
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
+    return `${Math.floor(diff / 86400)} days ago`;
+}
+
+// Refresh button
+document.getElementById('refreshNodes').addEventListener('click', function() {
+    loadNodes();
+    this.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
+    setTimeout(() => {
+        this.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+    }, 1000);
+});
+
+// Auto-refresh
+function startAutoRefresh() {
+    if (autoRefresh) {
+        loadNodes();
+    }
+}
+
+// Load nodes on page load and set up auto-refresh
+loadNodes();
+setInterval(startAutoRefresh, 10000); // Refresh every 10 seconds
+
+// Socket.IO for real-time updates
+const socket = io();
+
+socket.on('node_discovered', function(data) {
+    console.log('New node discovered:', data);
+    showNotification(`New node discovered: ${data.node_id}`, 'success');
+    loadNodes(); // Refresh the list
+});
+
+socket.on('node_lost', function(data) {
+    console.log('Node lost:', data);
+    showNotification(`Node lost: ${data.node_id}`, 'warning');
+    loadNodes(); // Refresh the list
+});
+
+socket.on('stats_update', function(data) {
+    // Update any real-time stats if needed
+    console.log('Stats update received');
+});
+
+function showNotification(message, type = 'info') {
+    // Simple notification using Bootstrap alerts
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-3`;
+    alertDiv.innerHTML = `
+        <i class="fas fa-${type === 'success' ? 'check' : 'exclamation'}-circle"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.container').firstChild);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.remove();
+        }
+    }, 5000);
+}
+</script>
+{% endblock %}

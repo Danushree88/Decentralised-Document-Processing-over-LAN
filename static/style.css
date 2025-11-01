@@ -1,0 +1,51 @@
+/* Custom styles for the document processor */
+.node-status {
+    font-family: 'Courier New', monospace;
+}
+
+.capability-badge {
+    font-size: 0.7rem;
+    margin-right: 2px;
+}
+
+.stats-card {
+    transition: transform 0.2s;
+    cursor: pointer;
+}
+
+.stats-card:hover {
+    transform: translateY(-2px);
+}
+
+.progress {
+    height: 8px;
+}
+
+.document-card {
+    border-left: 4px solid #007bff;
+}
+
+.document-card.success {
+    border-left-color: #28a745;
+}
+
+.document-card.warning {
+    border-left-color: #ffc107;
+}
+
+.document-card.danger {
+    border-left-color: #dc3545;
+}
+
+.network-node {
+    border: 2px solid transparent;
+    transition: all 0.3s;
+}
+
+.network-node.leader {
+    border-color: #28a745;
+}
+
+.network-node.self {
+    border-color: #007bff;
+}
