@@ -2,66 +2,50 @@ import socket
 import platform
 
 def get_local_ip():
-    """Get the local IP address of the machine - Windows compatible version"""
+    """Get local IP address - Enhanced version"""
     try:
-        # Method 1: Connect to external address
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        # Method 1: Connect to external service
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            return ip
     except:
         try:
             # Method 2: Get hostname
             hostname = socket.gethostname()
             ip = socket.gethostbyname(hostname)
-            if ip and not ip.startswith('127.'):
-                return ip
+            if ip.startswith('127.'):
+                raise Exception("Localhost IP")
+            return ip
         except:
-            pass
-        return '127.0.0.1'
+            # Method 3: Try all interfaces
+            try:
+                return socket.gethostbyname(socket.gethostname() + ".local")
+            except:
+                return '127.0.0.1'
 
-def get_broadcast_addr():
-    """Get broadcast address for the local network"""
-    local_ip = get_local_ip()
-    if local_ip == '127.0.0.1':
-        return "255.255.255.255"
-    
-    # Simple method: replace last part with 255
-    parts = local_ip.split('.')
-    if len(parts) == 4:
-        parts[3] = '255'
-        return '.'.join(parts)
-    return "255.255.255.255"
-
-# Configuration
 class Config:
-    # Network
+    # Network Configuration
     BROADCAST_PORT = 8888
     TASK_PORT = 8889
     FILE_PORT = 8890
-    BROADCAST_ADDR = get_broadcast_addr()  # Use function instead of hardcoded
+    BROADCAST_ADDR = "255.255.255.255"
     HEARTBEAT_INTERVAL = 5  # seconds
     TASK_TIMEOUT = 30  # seconds
     
-    # Node capabilities
-    CAPABILITIES = {
-        'ocr': False,  # Set to True if Tesseract is installed
-        'text_extraction': True,
-        'nlp': True,
-        'file_processing': True
-    }
-    
-    # Paths
+    # File Processing
     UPLOAD_FOLDER = 'uploads'
     PROCESSED_FOLDER = 'processed'
     INDEX_FOLDER = 'search_index'
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
     
-    # Maximum file size (10MB)
-    MAX_FILE_SIZE = 10 * 1024 * 1024
-
-# Test the configuration
-if __name__ == "__main__":
-    print(f"Local IP: {get_local_ip()}")
-    print(f"Broadcast Address: {Config.BROADCAST_ADDR}")
-    print(f"Running on: {platform.system()}")
+    # Node Capabilities
+    CAPABILITIES = {
+        'text_extraction': True,
+        'file_processing': True,
+        'ocr': True,  # Enable OCR if available
+        'nlp': True,  # Enable NLP if available
+        'storage': 1000,  # MB available
+        'cpu_cores': 4,  # Estimated CPU cores
+        'memory_mb': 4096  # Estimated memory
+    }

@@ -1,205 +1,222 @@
-import os
 import json
-import sqlite3
+import os
 import logging
-import whoosh.index as index
-from whoosh.fields import Schema, TEXT, ID, KEYWORD, DATETIME
-from whoosh.qparser import QueryParser
-import datetime
+from datetime import datetime
+from collections import defaultdict
+import re
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class SearchIndex:
-    def __init__(self, index_path="search_index"):
-        self.index_path = index_path
-        self.schema = Schema(
-            file_id=ID(stored=True, unique=True),
-            file_name=TEXT(stored=True),
-            content=TEXT(stored=True),
-            keywords=KEYWORD(stored=True),
-            metadata=TEXT(stored=True),
-            processed_time=DATETIME(stored=True),
-            node_id=TEXT(stored=True)
-        )
-        self.setup_index()
-        self.setup_database()
+    def __init__(self, index_folder='search_index'):
+        self.index_folder = index_folder
+        self.index_file = os.path.join(index_folder, 'documents.json')
+        self.documents = {}
+        self.inverted_index = defaultdict(set)
+        
+        os.makedirs(index_folder, exist_ok=True)
+        self._load_index()
+        logger.info(f"✅ Search Index initialized with {len(self.documents)} documents")
     
-    def setup_index(self):
-        """Setup Whoosh search index"""
+    def _load_index(self):
+        """Load index from disk"""
         try:
-            if not os.path.exists(self.index_path):
-                os.makedirs(self.index_path, exist_ok=True)
-                self.ix = index.create_in(self.index_path, self.schema)
-                logging.info(f"Created new search index at {self.index_path}")
-            else:
-                # Check if index exists
-                if index.exists_in(self.index_path):
-                    self.ix = index.open_dir(self.index_path)
-                    logging.info(f"Opened existing search index at {self.index_path}")
-                else:
-                    self.ix = index.create_in(self.index_path, self.schema)
-                    logging.info(f"Created new search index at {self.index_path}")
+            if os.path.exists(self.index_file):
+                with open(self.index_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.documents = data.get('documents', {})
+                    # Rebuild inverted index
+                    for doc_id, doc in self.documents.items():
+                        self._update_inverted_index(doc_id, doc)
+                logger.info(f"✅ Loaded {len(self.documents)} documents from index")
         except Exception as e:
-            logging.error(f"Error setting up search index: {e}")
-            # Create fresh index if there's any error
-            if os.path.exists(self.index_path):
-                import shutil
-                shutil.rmtree(self.index_path)
-            os.makedirs(self.index_path, exist_ok=True)
-            self.ix = index.create_in(self.index_path, self.schema)
+            logger.error(f"Error loading index: {e}")
+            self.documents = {}
     
-    def setup_database(self):
-        """Setup SQLite database for metadata"""
+    def _save_index(self):
+        """Save index to disk"""
         try:
-            self.conn = sqlite3.connect('documents.db', check_same_thread=False)
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS documents (
-                    file_id TEXT PRIMARY KEY,
-                    file_name TEXT,
-                    file_path TEXT,
-                    file_size INTEGER,
-                    word_count INTEGER,
-                    character_count INTEGER,
-                    keywords TEXT,
-                    metadata TEXT,
-                    processed_time TEXT,
-                    node_id TEXT,
-                    content_preview TEXT
-                )
-            ''')
-            self.conn.commit()
-            logging.info("SQLite database setup completed")
-        except Exception as e:
-            logging.error(f"Error setting up database: {e}")
-    
-    def add_document(self, file_id, file_name, content, keywords, metadata, node_id):
-        """Add document to search index and database"""
-        try:
-            # Add to Whoosh index
-            writer = self.ix.writer()
-            writer.add_document(
-                file_id=file_id,
-                file_name=file_name,
-                content=content,
-                keywords=" ".join(keywords) if keywords else "",
-                metadata=json.dumps(metadata),
-                processed_time=datetime.datetime.now(),
-                node_id=node_id
-            )
-            writer.commit()
-            
-            # Add to SQLite database
-            cursor = self.conn.cursor()
-            content_preview = content[:500] + "..." if len(content) > 500 else content
-            
-            cursor.execute('''
-                INSERT OR REPLACE INTO documents 
-                (file_id, file_name, file_path, file_size, word_count, character_count, keywords, metadata, processed_time, node_id, content_preview)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                file_id,
-                file_name,
-                metadata.get('file_path', ''),
-                metadata.get('file_size', 0),
-                metadata.get('word_count', 0),
-                metadata.get('character_count', 0),
-                json.dumps(keywords) if keywords else "[]",
-                json.dumps(metadata),
-                metadata.get('processed_time', ''),
-                node_id,
-                content_preview
-            ))
-            self.conn.commit()
-            
-            logging.info(f"Added document to index: {file_name}")
+            with open(self.index_file, 'w', encoding='utf-8') as f:
+                json.dump({'documents': self.documents}, f, indent=2)
+            logger.info(f"💾 Saved index with {len(self.documents)} documents")
             return True
         except Exception as e:
-            logging.error(f"Error adding document to index: {e}")
+            logger.error(f"❌ Error saving index: {e}")
             return False
     
-    def search(self, query_string, limit=10):
-        """Search documents"""
+    def _update_inverted_index(self, doc_id, doc):
+        """Update inverted index for searching"""
         try:
-            results = []
-            with self.ix.searcher() as searcher:
-                query = QueryParser("content", self.ix.schema).parse(query_string)
-                search_results = searcher.search(query, limit=limit)
+            # Index keywords
+            for keyword in doc.get('keywords', []):
+                self.inverted_index[keyword.lower()].add(doc_id)
+            
+            # Index content words
+            content = doc.get('content', '')
+            words = re.findall(r'\w+', content.lower())
+            for word in words:
+                if len(word) > 2:  # Only index words longer than 2 chars
+                    self.inverted_index[word].add(doc_id)
+            
+            # Index filename
+            filename = doc.get('file_name', '').lower()
+            for word in re.findall(r'\w+', filename):
+                self.inverted_index[word].add(doc_id)
                 
-                for result in search_results:
-                    try:
-                        metadata = json.loads(result['metadata']) if result['metadata'] else {}
-                        keywords = result['keywords'].split() if result['keywords'] else []
-                        results.append({
-                            'file_id': result['file_id'],
-                            'file_name': result['file_name'],
-                            'content': result['content'][:200] + "..." if len(result['content']) > 200 else result['content'],
-                            'keywords': keywords,
-                            'metadata': metadata,
-                            'score': result.score
-                        })
-                    except Exception as e:
-                        logging.error(f"Error processing search result: {e}")
-                        continue
-            return results
         except Exception as e:
-            logging.error(f"Error searching: {e}")
+            logger.error(f"Error updating inverted index: {e}")
+    
+    def add_document(self, file_id, file_name, content, keywords, metadata, node_id):
+        """Add document to search index"""
+        try:
+            logger.info(f"📝 Adding document to index: {file_name}")
+            
+            # Create document entry
+            doc = {
+                'file_id': file_id,
+                'file_name': file_name,
+                'content': content,
+                'content_preview': content[:200] + '...' if len(content) > 200 else content,
+                'keywords': keywords,
+                'metadata': metadata,
+                'node_id': node_id,
+                'indexed_time': datetime.now().isoformat(),
+                'word_count': len(content.split()),
+                'file_size': metadata.get('file_size', 0)
+            }
+            
+            # Add to documents
+            self.documents[file_id] = doc
+            
+            # Update inverted index
+            self._update_inverted_index(file_id, doc)
+            
+            # Save to disk
+            self._save_index()
+            
+            logger.info(f"✅ Document added to index: {file_name} (ID: {file_id})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error adding document to index: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+    
+    def search(self, query, limit=10):
+        """Search documents by query"""
+        try:
+            logger.info(f"🔍 Searching for: '{query}'")
+            
+            if not query:
+                return []
+            
+            # Tokenize query
+            query_words = re.findall(r'\w+', query.lower())
+            
+            # Find matching documents
+            matching_docs = set()
+            for word in query_words:
+                if word in self.inverted_index:
+                    matching_docs.update(self.inverted_index[word])
+            
+            # If no matches in inverted index, do simple text search
+            if not matching_docs:
+                logger.info("No inverted index matches, doing full text search")
+                for doc_id, doc in self.documents.items():
+                    if query.lower() in doc['content'].lower() or query.lower() in doc['file_name'].lower():
+                        matching_docs.add(doc_id)
+            
+            # Score and sort results
+            results = []
+            for doc_id in matching_docs:
+                if doc_id in self.documents:
+                    doc = self.documents[doc_id]
+                    score = self._calculate_score(doc, query_words)
+                    results.append({
+                        'file_id': doc['file_id'],
+                        'file_name': doc['file_name'],
+                        'content': doc['content_preview'],
+                        'keywords': doc['keywords'],
+                        'metadata': doc['metadata'],
+                        'score': score,
+                        'node_id': doc['node_id']
+                    })
+            
+            # Sort by score
+            results.sort(key=lambda x: x['score'], reverse=True)
+            
+            logger.info(f"✅ Found {len(results)} matching documents")
+            return results[:limit]
+            
+        except Exception as e:
+            logger.error(f"❌ Search error: {e}")
             return []
     
+    def _calculate_score(self, doc, query_words):
+        """Calculate relevance score"""
+        score = 0
+        content_lower = doc['content'].lower()
+        filename_lower = doc['file_name'].lower()
+        
+        for word in query_words:
+            # Filename matches are highly relevant
+            if word in filename_lower:
+                score += 5
+            # Keyword matches are very relevant
+            if word in [k.lower() for k in doc['keywords']]:
+                score += 3
+            # Content matches
+            score += content_lower.count(word)
+        
+        return score
+    
     def get_all_documents(self):
-        """Get all documents from database"""
+        """Get all documents"""
         try:
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                SELECT file_id, file_name, file_size, word_count, keywords, processed_time, node_id, content_preview
-                FROM documents ORDER BY processed_time DESC
-            ''')
-            documents = []
-            for row in cursor.fetchall():
-                try:
-                    documents.append({
-                        'file_id': row[0],
-                        'file_name': row[1],
-                        'file_size': row[2],
-                        'word_count': row[3],
-                        'keywords': json.loads(row[4]) if row[4] and row[4] != "[]" else [],
-                        'processed_time': row[5],
-                        'node_id': row[6],
-                        'content_preview': row[7]
-                    })
-                except Exception as e:
-                    logging.error(f"Error processing document row: {e}")
-                    continue
-            return documents
+            docs = list(self.documents.values())
+            logger.info(f"📚 Retrieved {len(docs)} documents")
+            return docs
         except Exception as e:
-            logging.error(f"Error getting all documents: {e}")
+            logger.error(f"Error getting all documents: {e}")
             return []
+    
+    def get_document(self, file_id):
+        """Get specific document"""
+        return self.documents.get(file_id)
+    
+    def delete_document(self, file_id):
+        """Delete document from index"""
+        try:
+            if file_id in self.documents:
+                del self.documents[file_id]
+                self._save_index()
+                logger.info(f"🗑️ Deleted document: {file_id}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error deleting document: {e}")
+            return False
     
     def get_stats(self):
         """Get index statistics"""
         try:
-            cursor = self.conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM documents')
-            total_docs = cursor.fetchone()[0]
-            
-            cursor.execute('SELECT SUM(file_size) FROM documents')
-            total_size = cursor.fetchone()[0] or 0
-            
-            cursor.execute('SELECT SUM(word_count) FROM documents')
-            total_words = cursor.fetchone()[0] or 0
+            total_words = sum(doc['word_count'] for doc in self.documents.values())
+            total_size = sum(doc['file_size'] for doc in self.documents.values())
             
             return {
-                'total_documents': total_docs,
+                'total_documents': len(self.documents),
+                'total_words': total_words,
                 'total_size_bytes': total_size,
                 'total_size_mb': round(total_size / (1024 * 1024), 2),
-                'total_words': total_words
+                'indexed_terms': len(self.inverted_index)
             }
         except Exception as e:
-            logging.error(f"Error getting stats: {e}")
-            return {}
-    
-    def close(self):
-        """Close database connection"""
-        if hasattr(self, 'conn'):
-            self.conn.close()
+            logger.error(f"Error getting stats: {e}")
+            return {
+                'total_documents': 0,
+                'total_words': 0,
+                'total_size_bytes': 0,
+                'total_size_mb': 0,
+                'indexed_terms': 0
+            }
