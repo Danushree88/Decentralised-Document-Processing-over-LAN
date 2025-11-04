@@ -123,43 +123,95 @@ class TaskManager:
         finally:
             client_socket.close()
     
-    def distribute_task(self, file_path, task_type='full', target_peer=None):
-        """Distribute task to peer"""
+    def distribute_task(self, file_path, task_type='full'):
+        """Distribute task to peer - FIXED VERSION"""
         task_id = str(uuid.uuid4())
         
-        if target_peer:
-            # Send to specific peer
-            peers = [target_peer]
-        else:
-            # Find suitable peer
-            peers = self._find_suitable_peers(task_type)
+        logging.info(f"🎯 Starting task distribution for: {os.path.basename(file_path)}")
         
-        if not peers:
-            return None  # No suitable peers available
+        # Verify file exists and is readable
+        if not os.path.exists(file_path):
+            logging.error(f"❌ File does not exist: {file_path}")
+            return None
         
-        peer = peers[0]  # Select first suitable peer
-        self.peer_load[peer['id']] += 1
+        try:
+            file_size = os.path.getsize(file_path)
+            logging.info(f"📄 File verified: {os.path.basename(file_path)} ({file_size} bytes)")
+        except Exception as e:
+            logging.error(f"❌ Cannot access file {file_path}: {e}")
+            return None
         
-        task_data = {
-            'task_id': task_id,
-            'file_path': file_path,
-            'task_type': task_type,
-            'requester_id': self.node_id
-        }
+        # First, try to find peers for distribution
+        peers = self._find_suitable_peers(task_type)
+        logging.info(f"🔍 Found {len(peers)} suitable peers")
         
-        self.pending_tasks[task_id] = {
-            'task_data': task_data,
-            'peer_id': peer['id'],
-            'start_time': time.time(),
-            'status': 'distributed'
-        }
+        if peers:
+            # Try to distribute to peers
+            peer = peers[0]
+            logging.info(f"📤 Attempting to distribute to peer: {peer['id']}")
+            
+            self.peer_load[peer['id']] += 1
+            
+            task_data = {
+                'task_id': task_id,
+                'file_path': file_path,
+                'task_type': task_type,
+                'requester_id': self.node_id
+            }
+            
+            self.pending_tasks[task_id] = {
+                'task_data': task_data,
+                'peer_id': peer['id'],
+                'start_time': time.time(),
+                'status': 'distributed'
+            }
+            
+            # Send task to peer
+            if self._send_task_to_peer(peer, task_data):
+                logging.info(f"✅ Task successfully distributed to peer {peer['id']}")
+                return task_id
+            else:
+                logging.error(f"❌ Failed to distribute to peer {peer['id']}, falling back to local processing")
+                del self.pending_tasks[task_id]
+                self.peer_load[peer['id']] -= 1
+                # Continue to local processing
         
-        # Send task to peer
-        if self._send_task_to_peer(peer, task_data):
-            return task_id
-        else:
-            del self.pending_tasks[task_id]
-            self.peer_load[peer['id']] -= 1
+        # Fallback to local processing
+        logging.info("🔄 Processing file locally (no suitable peers or distribution failed)")
+        
+        try:
+            from document_processor import DocumentProcessor
+            processor = DocumentProcessor()
+            result = processor.process_document(file_path, task_type)
+            
+            if result['success']:
+                file_id = str(uuid.uuid4())
+                # Add to search index
+                index_success = self.search_index.add_document(
+                    file_id=file_id,
+                    file_name=result['metadata']['file_name'],
+                    content=result['text'],
+                    keywords=result['keywords'],
+                    metadata=result['metadata'],
+                    node_id=self.node_id
+                )
+                
+                if index_success:
+                    self.completed_tasks += 1
+                    logging.info(f"✅ Local processing completed for {os.path.basename(file_path)}")
+                    logging.info(f"📊 Extracted {len(result['text'])} characters, {len(result['keywords'])} keywords")
+                    return task_id
+                else:
+                    logging.error(f"❌ Failed to add document to search index: {os.path.basename(file_path)}")
+                    return None
+            else:
+                logging.error(f"❌ Document processing failed: {result.get('error', 'Unknown error')}")
+                return None
+                
+        except Exception as e:
+            logging.error(f"❌ Local processing failed for {file_path}: {e}")
+            import traceback
+            logging.error(f"❌ Stack trace: {traceback.format_exc()}")
             return None
     
     def _find_suitable_peers(self, task_type):
@@ -167,61 +219,112 @@ class TaskManager:
         suitable_peers = []
         
         with self.lock:
+            # If no peer capabilities, return empty list (process locally)
+            if not self.peer_capabilities:
+                return []
+                
             for peer_id, capabilities in self.peer_capabilities.items():
+                # Check if peer has the required capability
                 if task_type == 'ocr' and capabilities.get('ocr', False):
-                    suitable_peers.append({'id': peer_id, 'capabilities': capabilities})
+                    suitable_peers.append({'id': peer_id, 'capabilities': capabilities, 'ip': capabilities.get('ip', peer_id.split('_')[0])})
                 elif task_type == 'nlp' and capabilities.get('nlp', False):
-                    suitable_peers.append({'id': peer_id, 'capabilities': capabilities})
-                elif capabilities.get('text_extraction', False):
-                    suitable_peers.append({'id': peer_id, 'capabilities': capabilities})
+                    suitable_peers.append({'id': peer_id, 'capabilities': capabilities, 'ip': capabilities.get('ip', peer_id.split('_')[0])})
+                elif capabilities.get('text_extraction', False) or capabilities.get('file_processing', False):
+                    suitable_peers.append({'id': peer_id, 'capabilities': capabilities, 'ip': capabilities.get('ip', peer_id.split('_')[0])})
         
         # Sort by load (least loaded first)
         suitable_peers.sort(key=lambda x: self.peer_load.get(x['id'], 0))
+        
+        logging.info(f"🔍 Found {len(suitable_peers)} suitable peers for {task_type} task")
+        for peer in suitable_peers:
+            logging.info(f"   - {peer['id']} (load: {self.peer_load.get(peer['id'], 0)})")
+        
         return suitable_peers
     
     def _send_task_to_peer(self, peer, task_data):
-        """Send task to peer node"""
+        """Send task to peer node - FIXED VERSION"""
         try:
+            # Use peer IP instead of node_id for connection
+            peer_ip = None
+            peer_task_port = Config.TASK_PORT
+            peer_file_port = Config.FILE_PORT
+            
+            # Get peer connection info - avoid circular import
+            # Instead of importing peer_node, use the peer info we already have
+            if 'ip' in peer:
+                # If peer info already contains IP (from capabilities update)
+                peer_ip = peer['ip']
+            else:
+                # Try to extract IP from peer ID (format: IP_UUID)
+                peer_id_parts = peer['id'].split('_')
+                if len(peer_id_parts) >= 2:
+                    peer_ip = peer_id_parts[0]
+                else:
+                    logging.error(f"Cannot extract IP from peer ID: {peer['id']}")
+                    return False
+            
+            if not peer_ip or peer_ip == 'unknown':
+                logging.error(f"No valid IP address for peer {peer['id']}")
+                return False
+            
+            logging.info(f"Attempting to send task to {peer_ip}:{peer_task_port}")
+            
             # First, send the file
-            file_sent = self._send_file_to_peer(peer, task_data['file_path'])
+            file_sent = self._send_file_to_peer(peer_ip, peer_file_port, task_data['file_path'])
             if not file_sent:
+                logging.error(f"Failed to send file to {peer_ip}")
                 return False
             
             # Then, send the task
             task_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             task_socket.settimeout(Config.TASK_TIMEOUT)
-            task_socket.connect((peer['id'], Config.TASK_PORT))
             
-            task_data_bytes = json.dumps(task_data).encode('utf-8') + b"<END_TASK>"
-            task_socket.sendall(task_data_bytes)
-            
-            # Receive result
-            result_data = b""
-            while True:
-                chunk = task_socket.recv(4096)
-                if not chunk:
-                    break
-                result_data += chunk
-                if b"<END_RESULT>" in result_data:
-                    break
-            
-            result = json.loads(result_data.decode('utf-8').replace("<END_RESULT>", ""))
-            task_socket.close()
-            
-            # Process result
-            self._handle_task_result(task_data['task_id'], result, peer['id'])
-            return True
-            
+            try:
+                task_socket.connect((peer_ip, peer_task_port))
+                
+                task_data_bytes = json.dumps(task_data).encode('utf-8') + b"<END_TASK>"
+                task_socket.sendall(task_data_bytes)
+                
+                # Receive result
+                result_data = b""
+                start_time = time.time()
+                while time.time() - start_time < Config.TASK_TIMEOUT:
+                    try:
+                        chunk = task_socket.recv(4096)
+                        if not chunk:
+                            break
+                        result_data += chunk
+                        if b"<END_RESULT>" in result_data:
+                            break
+                    except socket.timeout:
+                        continue
+                
+                if b"<END_RESULT>" not in result_data:
+                    logging.error(f"Task timeout from {peer_ip}")
+                    return False
+                    
+                result = json.loads(result_data.decode('utf-8').replace("<END_RESULT>", ""))
+                task_socket.close()
+                
+                # Process result
+                self._handle_task_result(task_data['task_id'], result, peer['id'])
+                logging.info(f"✅ Task completed by {peer['id']}")
+                return True
+                
+            except Exception as e:
+                logging.error(f"Connection error to {peer_ip}:{peer_task_port}: {e}")
+                return False
+                
         except Exception as e:
             logging.error(f"Error sending task to peer {peer['id']}: {e}")
             return False
-    
-    def _send_file_to_peer(self, peer, file_path):
-        """Send file to peer node"""
+
+    def _send_file_to_peer(self, peer_ip, peer_file_port, file_path):
+        """Send file to peer node - FIXED VERSION"""
         try:
             file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             file_socket.settimeout(Config.TASK_TIMEOUT)
-            file_socket.connect((peer['id'], Config.FILE_PORT))
+            file_socket.connect((peer_ip, peer_file_port))
             
             # Send file metadata
             metadata = {
@@ -255,7 +358,7 @@ class TaskManager:
             return True
             
         except Exception as e:
-            logging.error(f"Error sending file to peer {peer['id']}: {e}")
+            logging.error(f"Error sending file to peer {peer_ip}:{peer_file_port}: {e}")
             return False
     
     def _handle_task_result(self, task_id, result, peer_id):
