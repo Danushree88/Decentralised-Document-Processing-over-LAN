@@ -16,7 +16,7 @@ class SearchIndex:
         
         os.makedirs(index_folder, exist_ok=True)
         self._load_index()
-        logger.info(f"✅ Search Index initialized with {len(self.documents)} documents")
+        logger.info(f" Search Index initialized with {len(self.documents)} documents")
     
     def _load_index(self):
         """Load index from disk"""
@@ -28,7 +28,7 @@ class SearchIndex:
                     # Rebuild inverted index
                     for doc_id, doc in self.documents.items():
                         self._update_inverted_index(doc_id, doc)
-                logger.info(f"✅ Loaded {len(self.documents)} documents from index")
+                logger.info(f" Loaded {len(self.documents)} documents from index")
         except Exception as e:
             logger.error(f"Error loading index: {e}")
             self.documents = {}
@@ -38,10 +38,10 @@ class SearchIndex:
         try:
             with open(self.index_file, 'w', encoding='utf-8') as f:
                 json.dump({'documents': self.documents}, f, indent=2)
-            logger.info(f"💾 Saved index with {len(self.documents)} documents")
+            logger.info(f" Saved index with {len(self.documents)} documents")
             return True
         except Exception as e:
-            logger.error(f"❌ Error saving index: {e}")
+            logger.error(f" Error saving index: {e}")
             return False
     
     def _update_inverted_index(self, doc_id, doc):
@@ -69,7 +69,7 @@ class SearchIndex:
     def add_document(self, file_id, file_name, content, keywords, metadata, node_id):
         """Add document to search index"""
         try:
-            logger.info(f"📝 Adding document to index: {file_name}")
+            logger.info(f" Adding document to index: {file_name}")
             
             # Create document entry
             doc = {
@@ -94,11 +94,11 @@ class SearchIndex:
             # Save to disk
             self._save_index()
             
-            logger.info(f"✅ Document added to index: {file_name} (ID: {file_id})")
+            logger.info(f" Document added to index: {file_name} (ID: {file_id})")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error adding document to index: {e}")
+            logger.error(f" Error adding document to index: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False
@@ -106,7 +106,7 @@ class SearchIndex:
     def search(self, query, limit=10):
         """Search documents by query"""
         try:
-            logger.info(f"🔍 Searching for: '{query}'")
+            logger.info(f" Searching for: '{query}'")
             
             if not query:
                 return []
@@ -146,11 +146,11 @@ class SearchIndex:
             # Sort by score
             results.sort(key=lambda x: x['score'], reverse=True)
             
-            logger.info(f"✅ Found {len(results)} matching documents")
+            logger.info(f" Found {len(results)} matching documents")
             return results[:limit]
             
         except Exception as e:
-            logger.error(f"❌ Search error: {e}")
+            logger.error(f" Search error: {e}")
             return []
     
     def _calculate_score(self, doc, query_words):
@@ -175,7 +175,7 @@ class SearchIndex:
         """Get all documents"""
         try:
             docs = list(self.documents.values())
-            logger.info(f"📚 Retrieved {len(docs)} documents")
+            logger.info(f" Retrieved {len(docs)} documents")
             return docs
         except Exception as e:
             logger.error(f"Error getting all documents: {e}")
@@ -191,7 +191,7 @@ class SearchIndex:
             if file_id in self.documents:
                 del self.documents[file_id]
                 self._save_index()
-                logger.info(f"🗑️ Deleted document: {file_id}")
+                logger.info(f" Deleted document: {file_id}")
                 return True
             return False
         except Exception as e:

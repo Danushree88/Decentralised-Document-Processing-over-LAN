@@ -1,3 +1,4 @@
+
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
 import os
@@ -6,16 +7,26 @@ import time
 import logging
 import threading
 import socket
+import sys
 
-# Setup logging FIRST - before anything else
+# Windows-compatible logging (no emojis)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('app.log')
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
     ]
 )
+
+# Force UTF-8 encoding for Windows console
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except:
+        pass
+
 logger = logging.getLogger(__name__)
 
 def get_local_ip():
@@ -40,7 +51,7 @@ components = {}
 try:
     from config import Config
     components['config'] = True
-    logger.info("✅ Config loaded")
+    logger.info("Config loaded")
     
     # Create directories
     os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
@@ -51,7 +62,7 @@ try:
     app.config['MAX_CONTENT_LENGTH'] = Config.MAX_FILE_SIZE
     
 except Exception as e:
-    logger.error(f"❌ Config failed: {e}")
+    logger.error(f"Config failed: {e}")
     # Fallback config
     class Config:
         UPLOAD_FOLDER = 'uploads'
@@ -77,9 +88,9 @@ try:
     from search_index import SearchIndex
     search_index = SearchIndex()
     components['search_index'] = True
-    logger.info("✅ Search Index initialized")
+    logger.info("Search Index initialized")
 except Exception as e:
-    logger.error(f"❌ Search Index failed: {e}")
+    logger.error(f"Search Index failed: {e}")
     # Fallback
     class FallbackSearchIndex:
         def __init__(self):
@@ -118,12 +129,12 @@ try:
     from document_processor import DocumentProcessor
     document_processor = DocumentProcessor()
     components['document_processor'] = True
-    logger.info("✅ Document Processor initialized")
+    logger.info("Document Processor initialized")
 except Exception as e:
-    logger.error(f"❌ Document Processor failed: {e}")
+    logger.error(f"Document Processor failed: {e}")
     # Fallback
     class FallbackDocumentProcessor:
-        def process_document(self, file_path, task_type='full'):
+        def process_task(self, file_path, task_type='full'):
             import os
             from datetime import datetime
             
@@ -161,56 +172,83 @@ try:
     from task_manager import TaskManager
     task_manager = TaskManager(temp_node_id, search_index)
     components['task_manager'] = True
-    logger.info("✅ Task Manager initialized")
+    logger.info("Task Manager initialized successfully")
 except Exception as e:
-    logger.error(f"❌ Task Manager failed: {e}")
-    # Fallback
+    logger.error(f"Task Manager failed: {e}")
+    import traceback
+    logger.error(traceback.format_exc())
+    
+    # Fallback TaskManager with ALL required attributes
     class FallbackTaskManager:
         def __init__(self, node_id, search_index):
             self.node_id = node_id
             self.search_index = search_index
             self.peer_load = {}
-            self.pending_tasks = 0
+            self.pending_tasks = {}  # Dict not int
             self.completed_tasks = 0
             self.peer_capabilities = {}
+            self.lock = threading.Lock()  # CRITICAL - Must have lock!
             logger.info("Using fallback task manager")
         
         def distribute_task(self, file_path, task_type='full'):
             try:
+                logger.info(f"Fallback: Processing {os.path.basename(file_path)} locally")
                 # Process locally as fallback
-                result = document_processor.process_document(file_path, task_type)
+                result = document_processor.process_task(file_path, task_type)
                 if result['success']:
+                    file_id = str(uuid.uuid4())
                     self.search_index.add_document(
-                        file_id=str(uuid.uuid4()),
+                        file_id=file_id,
                         file_name=result['metadata']['file_name'],
                         content=result['text'],
                         keywords=result['keywords'],
                         metadata=result['metadata'],
                         node_id=self.node_id
                     )
-                    self.completed_tasks += 1
+                    with self.lock:
+                        self.completed_tasks += 1
+                    logger.info(f"Fallback: Successfully processed {result['metadata']['file_name']}")
                     return f"task_{int(time.time())}"
             except Exception as e:
                 logger.error(f"Task processing error: {e}")
             return None
         
+        def distribute_batch(self, file_paths):
+            """Fallback batch processing"""
+            distributed_tasks = []
+            for file_path in file_paths:
+                task_id = self.distribute_task(file_path, 'full')
+                if task_id:
+                    distributed_tasks.append({
+                        'task_id': task_id,
+                        'file_path': file_path,
+                        'task_type': 'full',
+                        'priority': 1
+                    })
+            return distributed_tasks
+        
         def get_stats(self):
-            return {
-                'pending_tasks': self.pending_tasks,
-                'completed_tasks': self.completed_tasks,
-                'failed_tasks': 0,
-                'peer_load': self.peer_load,
-                'connected_peers': len(self.peer_capabilities)
-            }
+            with self.lock:
+                return {
+                    'pending_tasks': len(self.pending_tasks),
+                    'completed_tasks': self.completed_tasks,
+                    'failed_tasks': 0,
+                    'peer_load': dict(self.peer_load),
+                    'connected_peers': len(self.peer_capabilities)
+                }
         
         def update_peer_capabilities(self, peer_id, capabilities):
-            self.peer_capabilities[peer_id] = capabilities
+            with self.lock:
+                self.peer_capabilities[peer_id] = capabilities
+                logger.info(f"Fallback: Updated capabilities for {peer_id[:15]}...")
         
         def remove_peer(self, peer_id):
-            if peer_id in self.peer_capabilities:
-                del self.peer_capabilities[peer_id]
-            if peer_id in self.peer_load:
-                del self.peer_load[peer_id]
+            with self.lock:
+                if peer_id in self.peer_capabilities:
+                    del self.peer_capabilities[peer_id]
+                if peer_id in self.peer_load:
+                    del self.peer_load[peer_id]
+                logger.info(f"Fallback: Removed peer {peer_id[:15]}...")
     
     task_manager = FallbackTaskManager(temp_node_id, search_index)
 
@@ -219,13 +257,13 @@ try:
     from peer_node import PeerNode
     peer_node = PeerNode(task_manager=task_manager)
     components['peer_node'] = True
-    logger.info("✅ Peer Node initialized")
+    logger.info("Peer Node initialized")
     
     # Update task manager with actual node ID
     task_manager.node_id = peer_node.node_id
     
 except Exception as e:
-    logger.error(f"❌ Peer Node failed: {e}")
+    logger.error(f"Peer Node failed: {e}")
     # Fallback
     class FallbackPeerNode:
         def __init__(self, task_manager=None):
@@ -249,9 +287,6 @@ except Exception as e:
             pass
     
     peer_node = FallbackPeerNode(task_manager=task_manager)
-
-import os
-import socket
 
 def find_free_port(start_port=5000):
     """Find a free port starting from start_port"""
@@ -281,7 +316,7 @@ else:
     else:
         DEFAULT_PORT = find_free_port(5000)
 
-print(f"🎯 Using port: {DEFAULT_PORT}")
+print(f"Using port: {DEFAULT_PORT}")
 
 # Routes
 @app.route('/')
@@ -302,10 +337,8 @@ def nodes_page():
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
-    """Handle file upload - SIMPLE WORKING VERSION"""
+    """ENHANCED Upload with INTELLIGENT Load-Based Distribution"""
     try:
-        logger.info("📤 Upload request received")
-        
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
         
@@ -313,85 +346,251 @@ def upload_file():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        logger.info(f"📄 Processing file: {file.filename}")
-        
-        # Check file extension
-        allowed_extensions = {'txt', 'pdf', 'doc', 'docx', 'png', 'jpg', 'jpeg'}
-        file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
-        
-        if file_ext not in allowed_extensions:
-            return jsonify({'error': f'File type .{file_ext} not allowed'}), 400
-        
         # Save file
         file_id = str(uuid.uuid4())
         filename = f"{file_id}_{file.filename}"
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        
-        logger.info(f"💾 Saving file to: {file_path}")
         file.save(file_path)
         
-        # Verify file was saved
-        if not os.path.exists(file_path):
-            return jsonify({'error': 'File failed to save'}), 500
-            
-        file_size = os.path.getsize(file_path)
-        logger.info(f"✅ File saved: {filename} - Size: {file_size} bytes")
+        logger.info(f"File uploaded: {file.filename} ({os.path.getsize(file_path)} bytes)")
         
-        # PROCESS FILE IMMEDIATELY (bypass all complex distribution)
-        logger.info("🔄 Starting immediate processing...")
-        result = document_processor.process_document(file_path, 'full')
+        # Determine required task type
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        task_type_map = {
+            '.pdf': 'text_extraction',
+            '.txt': 'text_extraction',
+            '.doc': 'text_extraction',
+            '.docx': 'text_extraction',
+            '.jpg': 'ocr',
+            '.jpeg': 'ocr',
+            '.png': 'ocr'
+        }
+        required_task = task_type_map.get(file_ext, 'text_extraction')
+        
+        logger.info(f"Required capability: {required_task}")
+        
+        # CHECK NETWORK STATE - This is crucial!
+        available_peers = 0
+        try:
+            with task_manager.lock:
+                available_peers = len(task_manager.peer_capabilities)
+                logger.info(f"Available peers: {available_peers}")
+                
+                # Log peer capabilities
+                for peer_id, caps in task_manager.peer_capabilities.items():
+                    short_id = peer_id[:20] + '...' if len(peer_id) > 20 else peer_id
+                    logger.info(f"   Peer {short_id}: {caps}")
+        except Exception as e:
+            logger.error(f"Error checking peers: {e}")
+            available_peers = 0
+        
+        # STRATEGY 1: Try to distribute if we have capable peers
+        if available_peers > 0:
+            logger.info("Attempting distributed processing...")
+            task_id = task_manager.distribute_task(file_path, required_task)
+            
+            if task_id:
+                # Successfully queued for distribution
+                return jsonify({
+                    'success': True,
+                    'message': 'File queued for distributed processing',
+                    'task_id': task_id,
+                    'processed_by': 'distributed',
+                    'file_name': file.filename,
+                    'strategy': 'load_balanced',
+                    'available_peers': available_peers
+                })
+        
+        # STRATEGY 2: Process locally (no peers or distribution failed)
+        logger.info("Processing locally (no capable peers available)")
+        
+        result = document_processor.process_task(file_path, required_task)
         
         if result['success']:
-            logger.info(f"✅ Document processing successful: {len(result['text'])} characters extracted")
-            
             # Add to search index
-            index_success = search_index.add_document(
+            search_index.add_document(
                 file_id=file_id,
-                file_name=result['metadata']['file_name'],
-                content=result['text'],
-                keywords=result['keywords'],
-                metadata=result['metadata'],
+                file_name=file.filename,
+                content=result.get('text', ''),
+                keywords=result.get('keywords', []),
+                metadata=result.get('metadata', {}),
                 node_id=peer_node.node_id
             )
             
-            if index_success:
-                logger.info(f"✅ Document indexed successfully: {file.filename}")
-                
-                # Update task manager stats
-                task_manager.completed_tasks[file_id] = {
-                    'result': result,
-                    'completion_time': time.time(),
-                    'processed_by': 'local'
-                }
-                
-                return jsonify({
-                    'success': True,
-                    'task_id': file_id,
-                    'message': 'File uploaded, processed, and indexed successfully',
-                    'file_id': file_id,
-                    'file_path': file_path,
-                    'processed': True,
-                    'content_length': len(result['text']),
-                    'keywords': result['keywords']
+            # Emit stats update via WebSocket
+            try:
+                socketio.emit('stats_update', {
+                    'index_stats': search_index.get_stats(),
+                    'task_stats': task_manager.get_stats(),
+                    'peer_stats': {
+                        'total_peers': len(peer_node.get_peers()),
+                        'node_id': peer_node.node_id
+                    }
                 })
-            else:
-                logger.error("❌ Failed to add document to search index")
-                return jsonify({'error': 'Failed to index document'}), 500
-        else:
-            logger.error(f"❌ Document processing failed: {result.get('error', 'Unknown error')}")
-            return jsonify({'error': f'Processing failed: {result.get("error", "Unknown error")}'}), 500
+            except Exception as emit_error:
+                logger.error(f"Stats emit failed: {emit_error}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'File processed locally',
+                'file_id': file_id,
+                'processed_by': 'local',
+                'file_name': file.filename,
+                'strategy': 'local_processing',
+                'reason': 'no_capable_peers' if available_peers == 0 else 'distribution_failed'
+            })
+        
+        return jsonify({'error': 'Processing failed', 'details': result.get('error')}), 500
             
     except Exception as e:
-        logger.error(f"❌ Upload error: {e}")
+        logger.error(f"Upload error: {e}")
         import traceback
-        logger.error(f"❌ Stack trace: {traceback.format_exc()}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/upload-batch', methods=['POST'])
+def upload_batch():
+    """Upload multiple files for batch processing - VERIFIED VERSION"""
+    try:
+        if 'files' not in request.files:
+            return jsonify({'error': 'No files provided'}), 400
+        
+        files = request.files.getlist('files')
+        if not files or files[0].filename == '':
+            return jsonify({'error': 'No files selected'}), 400
+        
+        saved_files = []
+        upload_errors = []
+        
+        for file in files:
+            if file.filename == '':
+                continue
+                
+            file_id = str(uuid.uuid4())
+            filename = f"{file_id}_{file.filename}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            
+            # CRITICAL: Save file and VERIFY it was saved
+            try:
+                file.save(file_path)
+                
+                # Verify file was actually saved
+                if not os.path.exists(file_path):
+                    error_msg = f"File not created: {filename}"
+                    logger.error(error_msg)
+                    upload_errors.append(error_msg)
+                    continue
+                    
+                file_size = os.path.getsize(file_path)
+                if file_size == 0:
+                    error_msg = f"File saved as 0 bytes: {filename}"
+                    logger.error(error_msg)
+                    upload_errors.append(error_msg)
+                    # Remove the empty file
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
+                    continue
+                
+                # File saved successfully
+                saved_files.append(file_path)
+                logger.info(f"✅ File saved successfully: {filename} ({file_size} bytes)")
+                
+            except Exception as e:
+                error_msg = f"Error saving {filename}: {str(e)}"
+                logger.error(error_msg)
+                upload_errors.append(error_msg)
+        
+        # Check if any files were successfully saved
+        if not saved_files:
+            error_response = {
+                'error': 'No files were successfully uploaded',
+                'details': upload_errors
+            }
+            if upload_errors:
+                error_response['upload_errors'] = upload_errors
+            return jsonify(error_response), 400
+        
+        logger.info(f"Successfully saved {len(saved_files)} files, proceeding with distribution")
+        
+        # DISTRIBUTE BATCH WITH INTELLIGENT SEGMENTATION
+        distributed_tasks = task_manager.distribute_batch(saved_files)
+        
+        response = {
+            'success': True,
+            'message': f'Batch of {len(saved_files)} files distributed for processing',
+            'distributed_tasks': distributed_tasks,
+            'total_tasks': len(distributed_tasks),
+            'files_saved': len(saved_files)
+        }
+        
+        # Include any non-fatal errors in the response
+        if upload_errors:
+            response['warnings'] = upload_errors
+            
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Batch upload error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
     
+@app.route('/api/debug/uploads')
+def debug_uploads():
+    """Debug uploaded files with detailed info"""
+    uploads = []
+    total_size = 0
+    
+    upload_folder = app.config['UPLOAD_FOLDER']
+    
+    # Check if upload folder exists and is accessible
+    folder_info = {
+        'path': upload_folder,
+        'exists': os.path.exists(upload_folder),
+        'writable': os.access(upload_folder, os.W_OK) if os.path.exists(upload_folder) else False,
+        'absolute_path': os.path.abspath(upload_folder) if os.path.exists(upload_folder) else 'N/A'
+    }
+    
+    if os.path.exists(upload_folder):
+        for filename in os.listdir(upload_folder):
+            file_path = os.path.join(upload_folder, filename)
+            if os.path.isfile(file_path):
+                file_size = os.path.getsize(file_path)
+                uploads.append({
+                    'name': filename,
+                    'size_bytes': file_size,
+                    'size_kb': round(file_size / 1024, 2),
+                    'size_mb': round(file_size / (1024 * 1024), 2),
+                    'modified': time.ctime(os.path.getmtime(file_path)),
+                    'exists': os.path.exists(file_path),
+                    'readable': os.access(file_path, os.R_OK)
+                })
+                total_size += file_size
+    
+    return jsonify({
+        'folder_info': folder_info,
+        'total_files': len(uploads),
+        'total_size_bytes': total_size,
+        'total_size_mb': round(total_size / (1024 * 1024), 2),
+        'files': uploads,
+        'timestamp': time.time()
+    })
+
 @app.route('/api/job-stats')
 def get_job_stats():
     """Get detailed job distribution statistics"""
     try:
         task_stats = task_manager.get_stats()
+        
+        # Check if node_job_stats exists
+        if not hasattr(task_manager, 'node_job_stats'):
+            return jsonify({
+                'job_distribution': {},
+                'nodes_with_stats': [],
+                'total_jobs_processed': task_stats.get('completed_tasks', 0),
+                'timestamp': time.time()
+            })
         
         # Enhanced node information with job stats
         nodes_with_stats = []
@@ -399,7 +598,7 @@ def get_job_stats():
             node_info = {
                 'node_id': node_id,
                 'job_stats': job_stats,
-                'current_load': task_stats['peer_load'].get(node_id, 0),
+                'current_load': task_stats.get('peer_load', {}).get(node_id, 0),
                 'is_self': node_id == peer_node.node_id
             }
             nodes_with_stats.append(node_info)
@@ -407,12 +606,19 @@ def get_job_stats():
         return jsonify({
             'job_distribution': task_stats.get('job_distribution', {}),
             'nodes_with_stats': nodes_with_stats,
-            'total_jobs_processed': task_stats['total_tasks_processed'],
+            'total_jobs_processed': task_stats.get('completed_tasks', 0),
             'timestamp': time.time()
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
+        logger.error(f"Job stats error: {e}")
+        return jsonify({
+            'job_distribution': {},
+            'nodes_with_stats': [],
+            'total_jobs_processed': 0,
+            'error': str(e),
+            'timestamp': time.time()
+        })
+
 @app.route('/api/debug/peers')
 def debug_peers():
     """Debug peer information"""
@@ -442,7 +648,7 @@ def debug_files():
 
 @app.route('/api/search')
 def search_documents():
-    """Search documents - FIXED VERSION"""
+    """Search documents"""
     try:
         query = request.args.get('q', '').strip()
         limit = int(request.args.get('limit', 10))
@@ -450,9 +656,9 @@ def search_documents():
         if not query:
             return jsonify({'error': 'No query provided'}), 400
         
-        logger.info(f"🔍 Searching for: '{query}'")
+        logger.info(f"Searching for: '{query}'")
         results = search_index.search(query, limit)
-        logger.info(f"✅ Search found {len(results)} results")
+        logger.info(f"Search found {len(results)} results")
         
         return jsonify({
             'results': results,
@@ -466,10 +672,10 @@ def search_documents():
 
 @app.route('/api/documents')
 def get_all_documents():
-    """Get all documents - FIXED VERSION"""
+    """Get all documents"""
     try:
         documents = search_index.get_all_documents()
-        logger.info(f"📚 Retrieved {len(documents)} documents from database")
+        logger.info(f"Retrieved {len(documents)} documents from database")
         return jsonify({
             'documents': documents,
             'total_documents': len(documents)
@@ -477,8 +683,6 @@ def get_all_documents():
     except Exception as e:
         logger.error(f"Get documents error: {e}")
         return jsonify({'documents': [], 'error': str(e)})
-    
-# Add this to your main.py after the existing routes
 
 @app.route('/api/debug/system-status')
 def debug_system_status():
@@ -551,7 +755,7 @@ def get_stats():
             'task_stats': {'completed_tasks': 0},
             'peer_stats': {'node_id': 'unknown'}
         })
-    
+
 @app.route('/api/tasks')
 def get_tasks():
     """Get current tasks status"""
@@ -560,15 +764,16 @@ def get_tasks():
         pending_tasks = []
         
         # Get details for pending tasks
-        for task_id, task_info in task_manager.pending_tasks.items():
-            pending_tasks.append({
-                'task_id': task_id,
-                'file_name': task_info['task_data'].get('file_name', 'Unknown'),
-                'status': task_info.get('status', 'unknown'),
-                'peer_id': task_info.get('peer_id'),
-                'start_time': task_info.get('start_time'),
-                'attempts': task_info.get('attempts', 0)
-            })
+        if hasattr(task_manager, 'pending_tasks'):
+            for task_id, task_info in task_manager.pending_tasks.items():
+                pending_tasks.append({
+                    'task_id': task_id,
+                    'file_name': task_info.get('task_data', {}).get('file_name', 'Unknown'),
+                    'status': task_info.get('status', 'unknown'),
+                    'peer_id': task_info.get('peer_id'),
+                    'start_time': task_info.get('start_time'),
+                    'attempts': task_info.get('attempts', 0)
+                })
         
         return jsonify({
             'stats': stats,
@@ -582,73 +787,13 @@ def get_tasks():
 def get_task_status(task_id):
     """Get status of specific task"""
     try:
-        status = task_manager.get_task_status(task_id)
-        return jsonify(status)
+        if hasattr(task_manager, 'get_task_status'):
+            status = task_manager.get_task_status(task_id)
+            return jsonify(status)
+        return jsonify({'status': 'unknown'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
-@app.route('/api/debug/upload-test')
-def debug_upload_test():
-    """Test upload functionality step by step"""
-    try:
-        # Create a test file
-        test_content = "This is a test document for debugging upload issues."
-        test_filename = f"debug_test_{int(time.time())}.txt"
-        test_path = os.path.join(app.config['UPLOAD_FOLDER'], test_filename)
-        
-        with open(test_path, 'w', encoding='utf-8') as f:
-            f.write(test_content)
-        
-        logger.info(f"📝 Created test file: {test_path}")
-        
-        # Test 1: Check if file was created
-        file_exists = os.path.exists(test_path)
-        file_size = os.path.getsize(test_path) if file_exists else 0
-        
-        # Test 2: Test document processor
-        processor_result = document_processor.process_document(test_path, 'full')
-        
-        # Test 3: Test search index
-        file_id = str(uuid.uuid4())
-        search_success = search_index.add_document(
-            file_id=file_id,
-            file_name=test_filename,
-            content=processor_result['text'],
-            keywords=processor_result['keywords'],
-            metadata=processor_result['metadata'],
-            node_id=peer_node.node_id
-        )
-        
-        # Test 4: Test task manager
-        task_id = task_manager.distribute_task(test_path, 'full')
-        
-        return jsonify({
-            'test_file': {
-                'path': test_path,
-                'exists': file_exists,
-                'size': file_size,
-                'content': test_content
-            },
-            'document_processor': {
-                'success': processor_result['success'],
-                'text_length': len(processor_result.get('text', '')),
-                'keywords': processor_result.get('keywords', [])
-            },
-            'search_index': {
-                'success': search_success,
-                'documents_count': search_index.get_stats()['total_documents']
-            },
-            'task_manager': {
-                'task_id': task_id,
-                'success': task_id is not None,
-                'stats': task_manager.get_stats()
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Debug upload test failed: {e}")
-        return jsonify({'error': str(e)}), 500
-    
+
 @app.route('/api/debug')
 def debug_info():
     """Debug information"""
@@ -703,6 +848,7 @@ def background_stats():
         except Exception as e:
             logger.error(f"Background stats error: {e}")
         time.sleep(5)
+
 @app.route('/api/debug/full-status')
 def debug_full_status():
     """Comprehensive system status"""
@@ -746,11 +892,10 @@ def debug_full_status():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
+
 # Start background thread
 stats_thread = threading.Thread(target=background_stats, daemon=True)
 stats_thread.start()
-
 if __name__ == '__main__':
     local_ip = get_local_ip()
     
@@ -759,18 +904,18 @@ if __name__ == '__main__':
         free_port = DEFAULT_PORT
         
         print("\n" + "="*60)
-        print("🚀 DECENTRALIZED DOCUMENT PROCESSING SYSTEM")
+        print(" DECENTRALIZED DOCUMENT PROCESSING SYSTEM")
         print("="*60)
-        print(f"📍 Node ID: {peer_node.node_id}")
-        print(f"🌐 Network URL: http://{local_ip}:{free_port}")
-        print(f"💻 Local URL: http://localhost:{free_port}")
-        print(f"📊 Components: {', '.join(components.keys())}")
+        print(f" Node ID: {peer_node.node_id}")
+        print(f" Network URL: http://{local_ip}:{free_port}")
+        print(f" Local URL: http://localhost:{free_port}")
+        print(f" Components: {', '.join(components.keys())}")
         print("="*60)
-        print("✅ System is READY!")
+        print(" System is READY!")
         print("="*60)
         
-        print(f"🚀 Starting on port: {free_port}")
+        print(f" Starting on port: {free_port}")
         socketio.run(app, host='0.0.0.0', port=free_port, debug=False, allow_unsafe_werkzeug=True)
     except Exception as e:
         logger.error(f"Failed to start: {e}")
-        print(f"❌ Failed to start: {e}")
+        print(f"Failed to start: {e}")

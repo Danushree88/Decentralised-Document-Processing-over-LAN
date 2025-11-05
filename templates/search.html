@@ -169,106 +169,95 @@
             }
         }
 
-        // Load all documents function
         async function loadAllDocuments() {
-            console.log('📚 Loading all documents...');
-            const docsDiv = document.getElementById('allDocuments');
-            
-            // Show loading
+    console.log('📚 Loading all documents...');
+    const docsDiv = document.getElementById('allDocuments');
+    
+    docsDiv.innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading documents...</p>
+        </div>`;
+    
+    try {
+        const response = await fetch('/api/documents');
+        console.log('📡 Documents API response status:', response.status);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('📄 Documents data received:', data);
+        
+        if (!data.documents || data.documents.length === 0) {
             docsDiv.innerHTML = `
-                <div class="text-center">
-                    <div class="spinner-border" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2">Loading documents...</p>
+                <div class="alert alert-info text-center">
+                    <i class="fas fa-inbox"></i>
+                    <h5>No Documents Yet</h5>
+                    <p>Upload some documents to get started!</p>
+                    <a href="/upload" class="btn btn-primary">
+                        <i class="fas fa-upload"></i> Upload Documents
+                    </a>
                 </div>`;
+            return;
+        }
+        
+        console.log(`✅ Found ${data.documents.length} documents`);
+        
+        let html = '<div class="row">';
+        data.documents.forEach((doc, index) => {
+            const displayName = doc.file_name || 'Unknown';
+            const preview = doc.content_preview || doc.content?.substring(0, 150) + '...' || 'No preview';
+            const keywords = doc.keywords || [];
+            const wordCount = doc.word_count || doc.metadata?.word_count || 0;
+            const fileSize = doc.file_size || doc.metadata?.file_size || 0;
             
-            try {
-                const response = await fetch('/api/documents');
-                console.log('📡 Documents API response status:', response.status);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                console.log('📄 Documents data received:', data);
-                
-                if (!data.documents || data.documents.length === 0) {
-                    docsDiv.innerHTML = `
-                        <div class="alert alert-info text-center">
-                            <i class="fas fa-inbox"></i>
-                            <h5>No Documents Yet</h5>
-                            <p>Upload some documents to get started!</p>
-                            <a href="/upload" class="btn btn-primary">
-                                <i class="fas fa-upload"></i> Upload Documents
-                            </a>
-                        </div>`;
-                    return;
-                }
-                
-                console.log(`✅ Found ${data.documents.length} documents`);
-                
-                let html = '<div class="row">';
-                data.documents.forEach((doc, index) => {
-                    // Extract just the filename without UUID prefix
-                    const displayName = doc.file_name.includes('_') ? 
-                        doc.file_name.split('_').slice(1).join('_') : 
-                        doc.file_name;
-                    
-                    html += `
-                        <div class="col-md-6 mb-3">
-                            <div class="card h-100 border-start border-primary border-3">
-                                <div class="card-body">
-                                    <h6 class="card-title">
-                                        <i class="fas fa-file-pdf text-danger"></i> ${displayName}
-                                    </h6>
-                                    <p class="card-text small text-muted">
-                                        ${doc.content_preview || doc.content.substring(0, 150) + '...'}
-                                    </p>
-                                    <div class="mb-2">
-                                        ${(doc.keywords || []).slice(0, 5).map(keyword => 
-                                            `<span class="badge bg-light text-dark me-1" style="font-size: 0.7rem">${keyword}</span>`
-                                        ).join('')}
-                                    </div>
-                                </div>
-                                <div class="card-footer bg-light">
-                                    <small class="text-muted">
-                                        <i class="fas fa-font"></i> ${doc.word_count || 0} words | 
-                                        <i class="fas fa-hdd"></i> ${((doc.file_size || 0) / 1024).toFixed(1)} KB | 
-                                        <i class="fas fa-calendar"></i> ${doc.indexed_time ? new Date(doc.indexed_time).toLocaleDateString() : 'Unknown'}
-                                    </small>
-                                </div>
+            html += `
+                <div class="col-md-6 mb-3">
+                    <div class="card h-100 border-start border-primary border-3">
+                        <div class="card-body">
+                            <h6 class="card-title">
+                                <i class="fas fa-file-pdf text-danger"></i> ${displayName}
+                            </h6>
+                            <p class="card-text small text-muted">${preview}</p>
+                            <div class="mb-2">
+                                ${keywords.slice(0, 5).map(keyword => 
+                                    `<span class="badge bg-light text-dark me-1" style="font-size: 0.7rem">${keyword}</span>`
+                                ).join('')}
                             </div>
                         </div>
-                    `;
-                });
-                html += '</div>';
-                
-                docsDiv.innerHTML = html;
-                console.log('✅ Documents displayed successfully!');
-                
-            } catch (error) {
-                console.error('❌ Error loading documents:', error);
-                docsDiv.innerHTML = `
-                    <div class="alert alert-danger">
-                        <i class="fas fa-exclamation-circle"></i> Error loading documents: ${error.message}
-                        <br><small>Check browser console for details (F12)</small>
-                        <br><button class="btn btn-sm btn-primary mt-2" onclick="loadAllDocuments()">
-                            <i class="fas fa-redo"></i> Try Again
-                        </button>
-                    </div>`;
-            }
-        }
+                        <div class="card-footer bg-light">
+                            <small class="text-muted">
+                                <i class="fas fa-font"></i> ${wordCount} words | 
+                                <i class="fas fa-hdd"></i> ${(fileSize / 1024).toFixed(1)} KB
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+        
+        docsDiv.innerHTML = html;
+        console.log('✅ Documents displayed successfully!');
+        
+    } catch (error) {
+        console.error('❌ Error loading documents:', error);
+        docsDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> Error loading documents: ${error.message}
+                <br><button class="btn btn-sm btn-primary mt-2" onclick="loadAllDocuments()">
+                    <i class="fas fa-redo"></i> Try Again
+                </button>
+            </div>`;
+    }
+}
 
-        // Load documents when DOM is ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', loadAllDocuments);
-        } else {
-            // DOM is already loaded
-            loadAllDocuments();
-        }
-
+// Auto-load on page ready
+document.addEventListener('DOMContentLoaded', loadAllDocuments);
         console.log('✅ Search page ready!');
     </script>
 </body>

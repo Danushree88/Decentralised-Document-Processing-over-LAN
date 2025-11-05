@@ -34,7 +34,7 @@ class PeerNode:
         threading.Thread(target=self._leader_election, daemon=True).start()
         
         logging.info(f"Peer node {self.node_id} started on {self.local_ip}")
-        print(f"🔍 Peer Discovery Started - Node ID: {self.node_id}")
+        print(f" Peer Discovery Started - Node ID: {self.node_id}")
     
     def _broadcast_presence(self):
         """Broadcast presence to LAN"""
@@ -53,9 +53,9 @@ class PeerNode:
                 message_bytes = json.dumps(message).encode('utf-8')
                 self.broadcast_socket.sendto(message_bytes, 
                                            (Config.BROADCAST_ADDR, Config.BROADCAST_PORT))
-                # print(f"📡 Broadcast sent from {self.node_id}")
+                # print(f" Broadcast sent from {self.node_id}")
             except Exception as e:
-                print(f"❌ Broadcast error: {e}")
+                print(f" Broadcast error: {e}")
             
             time.sleep(Config.HEARTBEAT_INTERVAL)
 
@@ -86,7 +86,7 @@ class PeerNode:
                             'ip': peer_ip  # Include IP for task distribution
                         })
                     
-                    print(f"✅ Discovered peer: {peer_id} at {peer_ip}")
+                    print(f" Discovered peer: {peer_id} at {peer_ip}")
                     print(f"   Active peers: {len(self.peers)}")
                     
             except socket.timeout:
@@ -95,7 +95,7 @@ class PeerNode:
                 continue
             except Exception as e:
                 if self.running:  # Only log if we're supposed to be running
-                    print(f"❌ Listener error: {e}")
+                    print(f" Listener error: {e}")
     
     def _cleanup_peers(self):
         """Remove peers that haven't been seen recently"""
@@ -115,10 +115,10 @@ class PeerNode:
                         self.task_manager.remove_peer(peer_id)
                     with self.lock:
                         del self.peers[peer_id]
-                    print(f"💀 Peer {peer_id} timed out")
+                    print(f" Peer {peer_id} timed out")
                     
             except Exception as e:
-                print(f"❌ Cleanup error: {e}")
+                print(f" Cleanup error: {e}")
             
             time.sleep(Config.HEARTBEAT_INTERVAL)
     
@@ -133,10 +133,10 @@ class PeerNode:
                     
                     if new_leader != self.leader_id:
                         self.leader_id = new_leader
-                        print(f"👑 New leader elected: {self.leader_id}")
+                        print(f" New leader elected: {self.leader_id}")
                 
             except Exception as e:
-                print(f"❌ Leader election error: {e}")
+                print(f" Leader election error: {e}")
             
             time.sleep(Config.HEARTBEAT_INTERVAL * 2)
 

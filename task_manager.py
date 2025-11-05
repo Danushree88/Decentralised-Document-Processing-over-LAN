@@ -5,9 +5,14 @@ import socket
 import os
 import uuid
 import logging
+import heapq
 import shutil
 from collections import deque, defaultdict
 from config import Config
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class TaskManager:
     def __init__(self, node_id, search_index):
@@ -17,9 +22,13 @@ class TaskManager:
         self.completed_tasks = {}
         self.failed_tasks = {}
         self.task_queue = deque()
+        self.task_priority_queue = []  # For priority-based task processing
         self.peer_load = defaultdict(int)
         self.peer_capabilities = {}
         self.lock = threading.Lock()
+        
+        # Ensure upload folder exists
+        os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
         
         # Task server setup
         self.task_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -33,14 +42,15 @@ class TaskManager:
         self.file_socket.bind(('0.0.0.0', Config.FILE_PORT))
         self.file_socket.listen(5)
 
+        # Enhanced job statistics tracking
         self.node_job_stats = defaultdict(lambda: {
-        'total_jobs': 0,
-        'completed_jobs': 0,
-        'failed_jobs': 0,
-        'job_types': defaultdict(int),
-        'total_processing_time': 0,
-        'last_job_time': None
-    })
+            'total_jobs': 0,
+            'completed_jobs': 0,
+            'failed_jobs': 0,
+            'job_types': defaultdict(int),
+            'total_processing_time': 0,
+            'last_job_time': None
+        })
         
         # Start servers
         self.running = True
@@ -49,72 +59,8 @@ class TaskManager:
         threading.Thread(target=self._task_monitor, daemon=True).start()
         threading.Thread(target=self._process_queued_tasks, daemon=True).start()
         
-        logging.info(f"✅ Task Manager started on ports {Config.TASK_PORT} (tasks) and {Config.FILE_PORT} (files)")
+        logger.info(f" Task Manager started on ports {Config.TASK_PORT} (tasks) and {Config.FILE_PORT} (files)")
 
-    # Enhanced _handle_task_result method
-    def _handle_task_result(self, task_id, result, peer_id):
-        """Handle completed task result with job tracking"""
-        with self.lock:
-            if task_id in self.pending_tasks:
-                task_info = self.pending_tasks[task_id]
-                
-                if result['success']:
-                    # Update job statistics
-                    self.node_job_stats[peer_id]['total_jobs'] += 1
-                    self.node_job_stats[peer_id]['completed_jobs'] += 1
-                    self.node_job_stats[peer_id]['job_types'][task_info['task_data']['task_type']] += 1
-                    self.node_job_stats[peer_id]['last_job_time'] = time.time()
-                    
-                    # Add to search index
-                    file_id = str(uuid.uuid4())
-                    index_success = self.search_index.add_document(
-                        file_id=file_id,
-                        file_name=result['metadata']['file_name'],
-                        content=result['text'],
-                        keywords=result['keywords'],
-                        metadata=result['metadata'],
-                        node_id=peer_id  # Track which node processed it
-                    )
-                    
-                    if index_success:
-                        self.completed_tasks[task_id] = {
-                            'task_info': task_info,
-                            'result': result,
-                            'completion_time': time.time(),
-                            'processed_by': peer_id
-                        }
-                        logging.info(f"📝 Successfully indexed document from peer {peer_id}")
-                
-                del self.pending_tasks[task_id]
-                self.peer_load[peer_id] = max(0, self.peer_load[peer_id] - 1)
-
-    # Enhanced get_stats method
-    def get_stats(self):
-        """Get task manager statistics with job distribution"""
-        with self.lock:
-            return {
-                'pending_tasks': len(self.pending_tasks),
-                'completed_tasks': len(self.completed_tasks),
-                'failed_tasks': len(self.failed_tasks),
-                'queued_tasks': len(self.task_queue),
-                'peer_load': dict(self.peer_load),
-                'connected_peers': len(self.peer_capabilities),
-                'total_tasks_processed': len(self.completed_tasks) + len(self.failed_tasks),
-                'node_job_stats': dict(self.node_job_stats),  # Add job distribution stats
-                'job_distribution': self._get_job_distribution_summary()
-            }
-
-    def _get_job_distribution_summary(self):
-        """Get summary of job distribution across nodes"""
-        summary = {}
-        for node_id, stats in self.node_job_stats.items():
-            summary[node_id] = {
-                'total_jobs': stats['total_jobs'],
-                'completion_rate': stats['completed_jobs'] / max(1, stats['total_jobs']),
-                'job_types': dict(stats['job_types']),
-                'last_active': stats['last_job_time']
-            }
-        return summary
     def _task_server(self):
         """Handle incoming task requests"""
         while self.running:
@@ -123,7 +69,7 @@ class TaskManager:
                 threading.Thread(target=self._handle_task_request, args=(client_socket, addr), daemon=True).start()
             except Exception as e:
                 if self.running:
-                    logging.error(f"Task server error: {e}")
+                    logger.error(f"Task server error: {e}")
 
     def _file_server(self):
         """Handle file transfers"""
@@ -133,7 +79,7 @@ class TaskManager:
                 threading.Thread(target=self._handle_file_transfer, args=(client_socket, addr), daemon=True).start()
             except Exception as e:
                 if self.running:
-                    logging.error(f"File server error: {e}")
+                    logger.error(f"File server error: {e}")
 
     def _handle_task_request(self, client_socket, addr):
         """Handle incoming task execution request"""
@@ -149,144 +95,231 @@ class TaskManager:
                     break
             
             task_data = json.loads(data.decode('utf-8').replace("<END_TASK>", ""))
-            logging.info(f"📥 Received task from {addr}: {task_data['task_id']}")
+            logger.info(f" Received task from {addr}: {task_data['task_id']}")
             
             # Process the task
             from document_processor import DocumentProcessor
             processor = DocumentProcessor()
-            result = processor.process_document(task_data['file_path'], task_data['task_type'])
+            result = processor.process_task(task_data['file_path'], task_data['task_type'])
             
             # Send result back
             response = json.dumps(result).encode('utf-8') + b"<END_RESULT>"
             client_socket.sendall(response)
-            logging.info(f"📤 Sent result for task {task_data['task_id']} to {addr}")
+            logger.info(f" Sent result for task {task_data['task_id']} to {addr}")
             
         except Exception as e:
-            logging.error(f"Error handling task request: {e}")
+            logger.error(f"Error handling task request: {e}")
             error_response = json.dumps({'success': False, 'error': str(e)}).encode('utf-8') + b"<END_RESULT>"
             client_socket.sendall(error_response)
         finally:
             client_socket.close()
 
     def _handle_file_transfer(self, client_socket, addr):
-        """Handle file upload/download"""
+        """Handle file transfers with LENGTH-PREFIXED protocol"""
         try:
-            # Receive file metadata
+            # Receive metadata length (4 bytes)
+            metadata_length_bytes = client_socket.recv(4)
+            if len(metadata_length_bytes) != 4:
+                logger.error(f"Incomplete metadata length from {addr}")
+                client_socket.sendall(b"FAILED_INCOMPLETE")
+                return
+                
+            metadata_length = int.from_bytes(metadata_length_bytes, 'big')
+            
+            # Receive metadata
             metadata_data = b""
-            while True:
-                chunk = client_socket.recv(1024)
+            while len(metadata_data) < metadata_length:
+                chunk = client_socket.recv(metadata_length - len(metadata_data))
                 if not chunk:
                     break
                 metadata_data += chunk
-                if b"<END_METADATA>" in metadata_data:
-                    break
             
-            metadata = json.loads(metadata_data.decode('utf-8').replace("<END_METADATA>", ""))
+            if len(metadata_data) != metadata_length:
+                logger.error(f"Incomplete metadata from {addr}")
+                client_socket.sendall(b"FAILED_INCOMPLETE")
+                return
+                
+            metadata = json.loads(metadata_data.decode('utf-8'))
+            
+            # Receive file length (8 bytes)
+            file_length_bytes = client_socket.recv(8)
+            if len(file_length_bytes) != 8:
+                logger.error(f"Incomplete file length from {addr}")
+                client_socket.sendall(b"FAILED_INCOMPLETE")
+                return
+                
+            file_length = int.from_bytes(file_length_bytes, 'big')
+            
+            # Save file
             file_path = os.path.join(Config.UPLOAD_FOLDER, metadata['file_name'])
+            received_bytes = 0
             
-            logging.info(f"📥 Receiving file: {metadata['file_name']} from {addr}")
-            
-            # Receive file data
             with open(file_path, 'wb') as f:
-                while True:
-                    data = client_socket.recv(4096)
-                    if not data:
+                while received_bytes < file_length:
+                    chunk = client_socket.recv(min(4096, file_length - received_bytes))
+                    if not chunk:
                         break
-                    if data.endswith(b"<END_FILE>"):
-                        f.write(data[:-10])  # Remove end marker
-                        break
-                    f.write(data)
+                    f.write(chunk)
+                    received_bytes += len(chunk)
             
-            # Verify file was received
-            if os.path.exists(file_path):
-                file_size = os.path.getsize(file_path)
-                logging.info(f"✅ File received: {metadata['file_name']} ({file_size} bytes)")
-                client_socket.sendall(b"FILE_RECEIVED<END_ACK>")
+            # Verify file was received correctly
+            actual_size = os.path.getsize(file_path)
+            if actual_size == file_length:
+                logger.info(f"File successfully received: {metadata['file_name']} ({actual_size} bytes)")
+                client_socket.sendall(b"SUCCESS")
             else:
-                logging.error(f"❌ File failed to save: {file_path}")
-                client_socket.sendall(b"FILE_ERROR<END_ACK>")
-            
+                logger.error(f"File size mismatch: expected {file_length}, got {actual_size}")
+                client_socket.sendall(b"FAILED_SIZE_MISMATCH")
+                
         except Exception as e:
-            logging.error(f"Error handling file transfer: {e}")
-            client_socket.sendall(b"FILE_ERROR<END_ACK>")
+            logger.error(f"File transfer error from {addr}: {e}")
+            client_socket.sendall(b"FAILED_ERROR")
         finally:
             client_socket.close()
 
-    def distribute_task(self, file_path, task_type='full'):
-        """Distribute task automatically - ENHANCED VERSION"""
+    def _send_file_to_peer(self, peer_ip, peer_file_port, file_path):
+        """Send file to peer with LENGTH-PREFIXED protocol"""
+        try:
+            if not os.path.exists(file_path):
+                logger.error(f"File not found: {file_path}")
+                return False
+            
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                logger.error(f"File is empty: {file_path}")
+                return False
+                
+            file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            file_socket.settimeout(30.0)
+            file_socket.connect((peer_ip, peer_file_port))
+            
+            # Send metadata with length prefix
+            metadata = {
+                'file_name': os.path.basename(file_path),
+                'file_size': file_size,
+                'timestamp': time.time()
+            }
+            metadata_bytes = json.dumps(metadata).encode('utf-8')
+            metadata_length = len(metadata_bytes).to_bytes(4, 'big')
+            
+            file_socket.sendall(metadata_length)
+            file_socket.sendall(metadata_bytes)
+            
+            # Send file with length prefix
+            file_length_bytes = file_size.to_bytes(8, 'big')
+            file_socket.sendall(file_length_bytes)
+            
+            # Send file data
+            sent_bytes = 0
+            with open(file_path, 'rb') as f:
+                while sent_bytes < file_size:
+                    chunk = f.read(4096)
+                    if not chunk:
+                        break
+                    file_socket.sendall(chunk)
+                    sent_bytes += len(chunk)
+            
+            # Wait for acknowledgment
+            ack = file_socket.recv(1024)
+            file_socket.close()
+            
+            if b"SUCCESS" in ack:
+                logger.info(f"File successfully sent to {peer_ip}: {os.path.basename(file_path)} ({file_size} bytes)")
+                return True
+            else:
+                logger.error(f"File transfer failed to {peer_ip}: {ack.decode('utf-8', errors='ignore')}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error sending file to {peer_ip}:{peer_file_port}: {e}")
+            return False
+        
+    def distribute_batch(self, file_paths):
+        """Distribute a batch of files with intelligent segmentation"""
+        from task_segmenter import TaskSegmenter
+        segmenter = TaskSegmenter(Config)
+        
+        # Segment files into specialized tasks
+        tasks_by_type = segmenter.analyze_document_batch(file_paths)
+        
+        distributed_tasks = []
+        
+        for task_type, tasks in tasks_by_type.items():
+            for task_data in tasks:
+                task_id = self._distribute_single_task(task_data)
+                if task_id:
+                    distributed_tasks.append({
+                        'task_id': task_id,
+                        'file_path': task_data['file_path'],
+                        'task_type': task_type,
+                        'priority': task_data['priority']
+                    })
+        
+        logger.info(f" Distributed {len(distributed_tasks)} specialized tasks")
+        return distributed_tasks
+
+    def _distribute_single_task(self, task_data):
+        """Distribute a single specialized task"""
         task_id = str(uuid.uuid4())
         
-        logging.info(f"🎯 Starting AUTOMATIC task distribution for: {os.path.basename(file_path)}")
-        
-        # Verify file exists and is readable
-        if not os.path.exists(file_path):
-            logging.error(f"❌ File does not exist: {file_path}")
-            return None
-        
-        try:
-            file_size = os.path.getsize(file_path)
-            logging.info(f"📄 File verified: {os.path.basename(file_path)} ({file_size} bytes)")
-        except Exception as e:
-            logging.error(f"❌ Cannot access file {file_path}: {e}")
-            return None
-        
-        # Create task data
-        task_data = {
+        enhanced_task_data = {
             'task_id': task_id,
-            'file_path': file_path,
-            'task_type': task_type,
+            'file_path': task_data['file_path'],
+            'task_type': task_data['task_type'],
+            'file_name': task_data['file_name'],
+            'file_size': task_data['file_size'],
+            'priority': task_data['priority'],
+            'estimated_time': task_data['estimated_time'],
             'requester_id': self.node_id,
-            'file_name': os.path.basename(file_path),
             'timestamp': time.time()
         }
         
-        # Add to queue for processing
+        # Add to priority queue and regular queue
         with self.lock:
-            self.task_queue.append(task_data)
+            heapq.heappush(self.task_priority_queue, (-enhanced_task_data['priority'], time.time(), task_id, enhanced_task_data))
+            self.task_queue.append(enhanced_task_data)
             self.pending_tasks[task_id] = {
-                'task_data': task_data,
+                'task_data': enhanced_task_data,
                 'start_time': time.time(),
                 'status': 'queued',
                 'attempts': 0
             }
-        
-        logging.info(f"✅ Task {task_id} queued for distribution")
+    
+        logger.info(f" Queued {task_data['task_type']} task for {task_data['file_name']}")
         return task_id
 
     def _process_queued_tasks(self):
         """Process queued tasks automatically"""
         while self.running:
             try:
-                if self.task_queue:
-                    task_data = self.task_queue[0]  # Peek at first task
-                    task_id = task_data['task_id']
-                    
-                    with self.lock:
-                        task_info = self.pending_tasks.get(task_id)
-                        if not task_info:
-                            self.task_queue.popleft()
-                            continue
+                task_to_process = None
+                
+                # Check priority queue first
+                with self.lock:
+                    if self.task_priority_queue:
+                        _, _, task_id, task_data = heapq.heappop(self.task_priority_queue)
+                        if task_id in self.pending_tasks:
+                            task_to_process = task_data
+                    elif self.task_queue:
+                        task_to_process = self.task_queue.popleft()
+                
+                if task_to_process:
+                    task_id = task_to_process['task_id']
                     
                     # Try to distribute to peers first
-                    distributed = self._try_distribute_to_peers(task_data)
+                    distributed = self._try_distribute_to_peers(task_to_process)
                     
                     if distributed:
-                        # Successfully distributed, remove from queue
-                        with self.lock:
-                            if self.task_queue and self.task_queue[0]['task_id'] == task_id:
-                                self.task_queue.popleft()
+                        logger.info(f" Successfully distributed {task_to_process['file_name']}")
                     else:
                         # Distribution failed, process locally
-                        logging.info(f"🔄 Distribution failed, processing locally: {task_data['file_name']}")
-                        self._process_locally(task_data)
-                        with self.lock:
-                            if self.task_queue and self.task_queue[0]['task_id'] == task_id:
-                                self.task_queue.popleft()
+                        logger.info(f" Distribution failed, processing locally: {task_to_process['file_name']}")
+                        self._process_locally(task_to_process)
                 
                 time.sleep(1)  # Small delay between processing attempts
                 
             except Exception as e:
-                logging.error(f"Error in task processor: {e}")
+                logger.error(f"Error in task processor: {e}")
                 time.sleep(5)
 
     def _try_distribute_to_peers(self, task_data):
@@ -299,14 +332,14 @@ class TaskManager:
         suitable_peers = self._find_suitable_peers(task_type)
         
         if not suitable_peers:
-            logging.info(f"ℹ️ No suitable peers found for {task_data['file_name']}, will process locally")
+            logger.info(f" No suitable peers found for {task_data['file_name']}, will process locally")
             return False
         
-        logging.info(f"🔍 Found {len(suitable_peers)} suitable peers for {task_data['file_name']}")
+        logger.info(f" Found {len(suitable_peers)} suitable peers for {task_data['file_name']}")
         
         # Try each suitable peer in order (least loaded first)
         for peer in suitable_peers:
-            logging.info(f"📤 Attempting distribution to {peer['id']} (IP: {peer['ip']})")
+            logger.info(f" Attempting distribution to {peer['id']} (IP: {peer['ip']})")
             
             # Update task status
             with self.lock:
@@ -321,7 +354,7 @@ class TaskManager:
             # Send file to peer
             file_sent = self._send_file_to_peer(peer['ip'], Config.FILE_PORT, file_path)
             if not file_sent:
-                logging.error(f"❌ Failed to send file to {peer['id']}")
+                logger.error(f" Failed to send file to {peer['id']}")
                 with self.lock:
                     self.peer_load[peer['id']] -= 1
                 continue
@@ -330,13 +363,13 @@ class TaskManager:
             task_sent = self._send_task_to_peer(peer, task_data)
             
             if task_sent:
-                logging.info(f"✅ Successfully distributed {task_data['file_name']} to {peer['id']}")
+                logger.info(f" Successfully distributed {task_data['file_name']} to {peer['id']}")
                 with self.lock:
                     if task_id in self.pending_tasks:
                         self.pending_tasks[task_id]['status'] = 'distributed'
                 return True
             else:
-                logging.error(f"❌ Failed to send task to {peer['id']}")
+                logger.error(f" Failed to send task to {peer['id']}")
                 with self.lock:
                     self.peer_load[peer['id']] -= 1
                     if task_id in self.pending_tasks:
@@ -350,7 +383,7 @@ class TaskManager:
             peer_ip = peer['ip']
             peer_task_port = Config.TASK_PORT
             
-            logging.info(f"🔗 Connecting to {peer_ip}:{peer_task_port} for task distribution")
+            logger.info(f" Connecting to {peer_ip}:{peer_task_port} for task distribution")
             
             # Create socket with timeout
             task_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -359,12 +392,12 @@ class TaskManager:
             try:
                 # Connect to peer
                 task_socket.connect((peer_ip, peer_task_port))
-                logging.info(f"✅ Connected to {peer_ip}:{peer_task_port}")
+                logger.info(f" Connected to {peer_ip}:{peer_task_port}")
                 
                 # Send task data
                 task_data_bytes = json.dumps(task_data).encode('utf-8') + b"<END_TASK>"
                 task_socket.sendall(task_data_bytes)
-                logging.info(f"📤 Sent task data to {peer_ip}")
+                logger.info(f" Sent task data to {peer_ip}")
                 
                 # Receive result with timeout
                 result_data = b""
@@ -381,7 +414,7 @@ class TaskManager:
                         continue
                 
                 if b"<END_RESULT>" not in result_data:
-                    logging.error(f"❌ Task timeout from {peer_ip}")
+                    logger.error(f" Task timeout from {peer_ip}")
                     return False
                 
                 # Process result
@@ -389,77 +422,29 @@ class TaskManager:
                 result = json.loads(result_str)
                 
                 if result.get('success', False):
-                    logging.info(f"✅ Task completed successfully by {peer['id']}")
+                    logger.info(f" Task completed successfully by {peer['id']}")
                     self._handle_task_result(task_data['task_id'], result, peer['id'])
                     return True
                 else:
-                    logging.error(f"❌ Task failed on peer {peer['id']}: {result.get('error', 'Unknown error')}")
+                    logger.error(f" Task failed on peer {peer['id']}: {result.get('error', 'Unknown error')}")
                     return False
                 
             except socket.timeout:
-                logging.error(f"❌ Connection timeout to {peer_ip}:{peer_task_port}")
+                logger.error(f" Connection timeout to {peer_ip}:{peer_task_port}")
                 return False
             except ConnectionRefusedError:
-                logging.error(f"❌ Connection refused by {peer_ip}:{peer_task_port}")
+                logger.error(f" Connection refused by {peer_ip}:{peer_task_port}")
                 return False
             except Exception as e:
-                logging.error(f"❌ Connection error to {peer_ip}:{peer_task_port}: {e}")
+                logger.error(f" Connection error to {peer_ip}:{peer_task_port}: {e}")
                 return False
             finally:
                 task_socket.close()
                 
         except Exception as e:
-            logging.error(f"❌ Error sending task to peer {peer['id']}: {e}")
+            logger.error(f" Error sending task to peer {peer['id']}: {e}")
             return False
 
-    def _send_file_to_peer(self, peer_ip, peer_file_port, file_path):
-        """Send file to peer node - ROBUST VERSION"""
-        try:
-            file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            file_socket.settimeout(10.0)
-            file_socket.connect((peer_ip, peer_file_port))
-            
-            # Send file metadata
-            metadata = {
-                'file_name': os.path.basename(file_path),
-                'file_size': os.path.getsize(file_path),
-                'timestamp': time.time()
-            }
-            metadata_bytes = json.dumps(metadata).encode('utf-8') + b"<END_METADATA>"
-            file_socket.sendall(metadata_bytes)
-            
-            # Send file data
-            with open(file_path, 'rb') as f:
-                while True:
-                    data = f.read(4096)
-                    if not data:
-                        break
-                    file_socket.sendall(data)
-            
-            file_socket.sendall(b"<END_FILE>")
-            
-            # Wait for acknowledgment
-            ack_data = b""
-            while True:
-                chunk = file_socket.recv(1024)
-                if not chunk:
-                    break
-                ack_data += chunk
-                if b"<END_ACK>" in ack_data:
-                    break
-            
-            file_socket.close()
-            
-            if b"FILE_RECEIVED" in ack_data:
-                logging.info(f"✅ File successfully sent to {peer_ip}")
-                return True
-            else:
-                logging.error(f"❌ File transfer failed to {peer_ip}")
-                return False
-            
-        except Exception as e:
-            logging.error(f"❌ Error sending file to {peer_ip}:{peer_file_port}: {e}")
-            return False
 
     def _process_locally(self, task_data):
         """Process file locally as fallback"""
@@ -468,11 +453,11 @@ class TaskManager:
             file_path = task_data['file_path']
             task_type = task_data['task_type']
             
-            logging.info(f"🔄 Processing locally: {task_data['file_name']}")
+            logger.info(f" Processing locally: {task_data['file_name']}")
             
             from document_processor import DocumentProcessor
             processor = DocumentProcessor()
-            result = processor.process_document(file_path, task_type)
+            result = processor.process_task(file_path, task_type)
             
             if result['success']:
                 file_id = str(uuid.uuid4())
@@ -496,16 +481,16 @@ class TaskManager:
                         if task_id in self.pending_tasks:
                             del self.pending_tasks[task_id]
                     
-                    logging.info(f"✅ Local processing completed for {task_data['file_name']}")
-                    logging.info(f"📊 Extracted {len(result['text'])} characters, {len(result['keywords'])} keywords")
+                    logger.info(f" Local processing completed for {task_data['file_name']}")
+                    logger.info(f" Extracted {len(result['text'])} characters, {len(result['keywords'])} keywords")
                     return True
                 else:
-                    logging.error(f"❌ Failed to add document to search index: {task_data['file_name']}")
+                    logger.error(f" Failed to add document to search index: {task_data['file_name']}")
             else:
-                logging.error(f"❌ Document processing failed: {result.get('error', 'Unknown error')}")
+                logger.error(f" Document processing failed: {result.get('error', 'Unknown error')}")
                 
         except Exception as e:
-            logging.error(f"❌ Local processing failed for {task_data['file_name']}: {e}")
+            logger.error(f" Local processing failed for {task_data['file_name']}: {e}")
         
         # Mark as failed
         with self.lock:
@@ -556,14 +541,78 @@ class TaskManager:
         suitable_peers.sort(key=lambda x: (-x['score'], x['load']))
         
         return suitable_peers
+    def distribute_task(self, file_path, task_type='auto'):
+        """Distribute task with DETAILED LOGGING"""
+        try:
+            logger.info(f"\n{'='*60}")
+            logger.info(f" TASK DISTRIBUTION REQUEST")
+            logger.info(f"{'='*60}")
+            logger.info(f"File: {os.path.basename(file_path)}")
+            logger.info(f"Task Type: {task_type}")
+            logger.info(f"File Size: {os.path.getsize(file_path)} bytes")
+            
+            # Create task data
+            task_data = {
+                'file_path': file_path,
+                'task_type': task_type,
+                'file_name': os.path.basename(file_path),
+                'file_size': os.path.getsize(file_path),
+                'priority': 1,
+                'estimated_time': 30
+            }
+            
+            # Check available peers
+            with self.lock:
+                logger.info(f"\n NETWORK STATUS:")
+                logger.info(f"Total peers: {len(self.peer_capabilities)}")
+                
+                if not self.peer_capabilities:
+                    logger.warning("  NO PEERS AVAILABLE - Will process locally")
+                    self._process_locally_immediate(task_data)
+                    return None
+                
+                # Find suitable peers
+                suitable_peers = self._find_suitable_peers(task_type)
+                logger.info(f"\n PEER SELECTION:")
+                logger.info(f"Suitable peers found: {len(suitable_peers)}")
+                
+                for peer in suitable_peers:
+                    logger.info(f"    {peer['id'][:20]}... (IP: {peer['ip']}, Load: {peer['load']}, Score: {peer['score']})")
+                
+                if not suitable_peers:
+                    logger.warning(f"  No peers with {task_type} capability - Processing locally")
+                    self._process_locally_immediate(task_data)
+                    return None
+            
+            # Queue the task
+            task_id = self._distribute_single_task(task_data)
+            logger.info(f"\n Task queued: {task_id}")
+            logger.info(f"{'='*60}\n")
+            return task_id
+                
+        except Exception as e:
+            logger.error(f" Distribution error: {e}")
+            return None
+
+    def _process_locally_immediate(self, task_data):
+        """Immediate local processing for when no peers are available"""
+        logger.info(" Starting immediate local processing...")
+        threading.Thread(target=self._process_locally, args=(task_data,), daemon=True).start()
 
     def _handle_task_result(self, task_id, result, peer_id):
-        """Handle completed task result from peer"""
+        """Handle completed task result - FIXED VERSION"""
         with self.lock:
             if task_id in self.pending_tasks:
                 task_info = self.pending_tasks[task_id]
                 
-                if result['success']:
+                # CRITICAL FIX: Check if processing actually succeeded
+                if result.get('success', False) and result.get('text', '').strip():
+                    # Valid result - process normally
+                    self.node_job_stats[peer_id]['total_jobs'] += 1
+                    self.node_job_stats[peer_id]['completed_jobs'] += 1
+                    self.node_job_stats[peer_id]['job_types'][task_info['task_data']['task_type']] += 1
+                    self.node_job_stats[peer_id]['last_job_time'] = time.time()
+                    
                     # Add to search index
                     file_id = str(uuid.uuid4())
                     index_success = self.search_index.add_document(
@@ -582,14 +631,25 @@ class TaskManager:
                             'completion_time': time.time(),
                             'processed_by': peer_id
                         }
-                        logging.info(f"📝 Successfully indexed document from peer {peer_id}")
+                        logger.info(f"Successfully processed and indexed document from peer {peer_id}")
                     else:
-                        logging.error(f"❌ Failed to index document from peer {peer_id}")
+                        logger.error(f"Failed to index document from peer {peer_id}")
                         self.failed_tasks[task_id] = {
                             'task_info': task_info,
                             'error': 'Indexing failed',
                             'failure_time': time.time()
                         }
+                else:
+                    # Task failed - mark appropriately
+                    error_msg = result.get('error', 'No content extracted')
+                    logger.error(f"Task failed on peer {peer_id}: {error_msg}")
+                    self.node_job_stats[peer_id]['total_jobs'] += 1
+                    self.node_job_stats[peer_id]['failed_jobs'] += 1
+                    self.failed_tasks[task_id] = {
+                        'task_info': task_info,
+                        'error': error_msg,
+                        'failure_time': time.time()
+                    }
                 
                 del self.pending_tasks[task_id]
                 self.peer_load[peer_id] = max(0, self.peer_load[peer_id] - 1)
@@ -618,7 +678,7 @@ class TaskManager:
                             self.peer_load[task_info['peer_id']] = max(0, self.peer_load[task_info['peer_id']] - 1)
                 
             except Exception as e:
-                logging.error(f"Task monitor error: {e}")
+                logger.error(f"Task monitor error: {e}")
             
             time.sleep(5)
 
@@ -658,7 +718,7 @@ class TaskManager:
                         del self.pending_tasks[task_id]
 
     def get_stats(self):
-        """Get task manager statistics"""
+        """Get task manager statistics with job distribution"""
         with self.lock:
             return {
                 'pending_tasks': len(self.pending_tasks),
@@ -667,8 +727,24 @@ class TaskManager:
                 'queued_tasks': len(self.task_queue),
                 'peer_load': dict(self.peer_load),
                 'connected_peers': len(self.peer_capabilities),
-                'total_tasks_processed': len(self.completed_tasks) + len(self.failed_tasks)
+                'total_tasks_processed': len(self.completed_tasks) + len(self.failed_tasks),
+                'node_job_stats': dict(self.node_job_stats),  # Add job distribution stats
+                'job_distribution': self._get_job_distribution_summary()
             }
+
+    def _get_job_distribution_summary(self):
+        """Get summary of job distribution across nodes"""
+        summary = {}
+        for node_id, stats in self.node_job_stats.items():
+            total_jobs = stats['total_jobs']
+            completed_jobs = stats['completed_jobs']
+            summary[node_id] = {
+                'total_jobs': total_jobs,
+                'completion_rate': completed_jobs / max(1, total_jobs),
+                'job_types': dict(stats['job_types']),
+                'last_active': stats['last_job_time']
+            }
+        return summary
 
     def get_task_status(self, task_id):
         """Get status of specific task"""
@@ -685,5 +761,14 @@ class TaskManager:
     def stop(self):
         """Stop the task manager"""
         self.running = False
-        self.task_socket.close()
-        self.file_socket.close()
+        try:
+            self.task_socket.close()
+        except:
+            pass
+        try:
+            self.file_socket.close()
+        except:
+            pass
+        logger.info(" Task Manager stopped")
+
+
