@@ -447,9 +447,10 @@ def upload_file():
         import traceback
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+    
 @app.route('/api/upload-batch', methods=['POST'])
 def upload_batch():
-    """Upload multiple files for batch processing - VERIFIED VERSION"""
+    """FIXED Batch upload with proper file handling"""
     try:
         if 'files' not in request.files:
             return jsonify({'error': 'No files provided'}), 400
@@ -461,73 +462,111 @@ def upload_batch():
         saved_files = []
         upload_errors = []
         
+        # PHASE 1: Save ALL files and WAIT for writes to complete
+        logger.info(f"\n{'='*60}")
+        logger.info(f"BATCH UPLOAD: {len(files)} files")
+        logger.info(f"{'='*60}")
+        
         for file in files:
             if file.filename == '':
                 continue
-                
+            
             file_id = str(uuid.uuid4())
             filename = f"{file_id}_{file.filename}"
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             
-            # CRITICAL: Save file and VERIFY it was saved
             try:
+                # Save file
                 file.save(file_path)
                 
-                # Verify file was actually saved
+                # CRITICAL: Force close Flask's handle
+                try:
+                    file.close()
+                except:
+                    pass
+                
+                # Wait for file to be written
+                time.sleep(0.1)
+                
+                # Verify file was saved
                 if not os.path.exists(file_path):
                     error_msg = f"File not created: {filename}"
                     logger.error(error_msg)
                     upload_errors.append(error_msg)
                     continue
-                    
-                file_size = os.path.getsize(file_path)
-                if file_size == 0:
+                
+                # Wait for stable file size
+                stable_size = None
+                for attempt in range(10):
+                    size1 = os.path.getsize(file_path)
+                    time.sleep(0.1)
+                    size2 = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                    if size1 == size2 and size1 > 0:
+                        stable_size = size1
+                        break
+                
+                if not stable_size or stable_size == 0:
                     error_msg = f"File saved as 0 bytes: {filename}"
                     logger.error(error_msg)
                     upload_errors.append(error_msg)
-                    # Remove the empty file
                     try:
                         os.remove(file_path)
                     except:
                         pass
                     continue
                 
-                # File saved successfully
                 saved_files.append(file_path)
-                logger.info(f"✅ File saved successfully: {filename} ({file_size} bytes)")
+                logger.info(f"File saved: {filename} ({stable_size} bytes)")
                 
             except Exception as e:
                 error_msg = f"Error saving {filename}: {str(e)}"
                 logger.error(error_msg)
                 upload_errors.append(error_msg)
         
-        # Check if any files were successfully saved
         if not saved_files:
-            error_response = {
+            return jsonify({
                 'error': 'No files were successfully uploaded',
                 'details': upload_errors
-            }
-            if upload_errors:
-                error_response['upload_errors'] = upload_errors
-            return jsonify(error_response), 400
+            }), 400
         
-        logger.info(f"Successfully saved {len(saved_files)} files, proceeding with distribution")
+        logger.info(f"Successfully saved {len(saved_files)} files")
         
-        # DISTRIBUTE BATCH WITH INTELLIGENT SEGMENTATION
-        distributed_tasks = task_manager.distribute_batch(saved_files)
+        # PHASE 2: Final verification
+        logger.info("Verifying all files are readable...")
+        
+        verified_files = []
+        for file_path in saved_files:
+            try:
+                # Try to open and read 1 byte
+                with open(file_path, 'rb') as f:
+                    f.read(1)
+                verified_files.append(file_path)
+            except Exception as e:
+                logger.error(f"File not readable: {file_path} - {e}")
+        
+        if not verified_files:
+            return jsonify({
+                'error': 'Files saved but not readable',
+                'details': 'File handle race condition'
+            }), 500
+        
+        logger.info(f"Verified {len(verified_files)} readable files")
+        
+        # PHASE 3: Distribute batch
+        distributed_tasks = task_manager.distribute_batch(verified_files)
         
         response = {
             'success': True,
-            'message': f'Batch of {len(saved_files)} files distributed for processing',
+            'message': f'Batch of {len(verified_files)} files distributed',
             'distributed_tasks': distributed_tasks,
             'total_tasks': len(distributed_tasks),
-            'files_saved': len(saved_files)
+            'files_saved': len(verified_files)
         }
         
-        # Include any non-fatal errors in the response
         if upload_errors:
             response['warnings'] = upload_errors
-            
+        
+        logger.info(f"{'='*60}\n")
         return jsonify(response)
         
     except Exception as e:

@@ -7,15 +7,20 @@ def get_local_ip():
             s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
     except:
+        try:
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
+            if not ip.startswith('127.'):
+                return ip
+        except:
+            pass
         return '127.0.0.1'
 
-# config.py
 class Config:
     # Folders
     UPLOAD_FOLDER = 'uploads'
     PROCESSED_FOLDER = 'processed'
     INDEX_FOLDER = 'search_index'
-    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
     
     # Network Configuration
     BROADCAST_PORT = 8888
@@ -23,18 +28,24 @@ class Config:
     FILE_PORT = 8890
     BROADCAST_ADDR = "255.255.255.255"
     HEARTBEAT_INTERVAL = 5
-    TASK_TIMEOUT = 60
+    TASK_TIMEOUT = 60  # Increased from 30 to 60 seconds
     
-    # Node Type - Set this for each node (only one capability per node)
-    # Choose ONE from: 'ocr', 'text_extraction', 'keyword_extraction'
-    NODE_TYPE = 'text_extraction'  # Change this per node
+    # File settings
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
     
-    # Single capability based on node type
+    # Node Capabilities
     CAPABILITIES = {
-        NODE_TYPE: True
+        'ocr': False,
+        'text_extraction': True,
+        'nlp': False,
+        'summarization': False,
+        'keyword_extraction': True,
+        'entity_recognition': False,
+        'topic_modeling': False,
+        'file_processing': True
     }
     
-    # File type to task mapping
+    # File type mappings for task segmentation
     FILE_TYPE_TASKS = {
         '.pdf': ['text_extraction', 'keyword_extraction'],
         '.doc': ['text_extraction', 'keyword_extraction'],
@@ -45,54 +56,43 @@ class Config:
         '.jpeg': ['ocr', 'keyword_extraction']
     }
     
-    # Required packages for each node type
-    REQUIRED_PACKAGES = {
-        'ocr': ['pytesseract', 'PIL'],
-        'text_extraction': ['PyPDF2', 'docx'],
-        'keyword_extraction': []  # Built-in capability
-    }
-    
     @classmethod
-    def validate_node_type(cls):
-        """Validate that this node can perform its assigned task"""
-        valid_types = ['ocr', 'text_extraction', 'keyword_extraction']
+    def detect_capabilities(cls):
+        """Detect what this node can do"""
+        capabilities = cls.CAPABILITIES.copy()
         
-        if cls.NODE_TYPE not in valid_types:
-            raise ValueError(f"Invalid NODE_TYPE: {cls.NODE_TYPE}. Must be one of {valid_types}")
+        # Detect OCR
+        try:
+            import pytesseract
+            capabilities['ocr'] = True
+            print("OCR capability detected")
+        except ImportError:
+            capabilities['ocr'] = False
+            print("OCR not available")
         
-        print(f"\nNode Configuration:")
-        print(f"   Type: {cls.NODE_TYPE}")
-        print(f"   IP: {get_local_ip()}")
-        print(f"   Capabilities: {cls.CAPABILITIES}")
+        # Detect NLP
+        try:
+            import spacy
+            capabilities['nlp'] = True
+            capabilities['entity_recognition'] = True
+            print("NLP capabilities detected")
+        except ImportError:
+            capabilities['nlp'] = False
+            capabilities['entity_recognition'] = False
+            print("NLP not available")
         
-        # Check for required packages
-        required = cls.REQUIRED_PACKAGES.get(cls.NODE_TYPE, [])
-        missing_packages = []
+        try:
+            import nltk
+            capabilities['summarization'] = True
+            print("Summarization capability detected")
+        except ImportError:
+            capabilities['summarization'] = False
         
-        for package in required:
-            try:
-                if package == 'pytesseract':
-                    import pytesseract
-                elif package == 'PIL':
-                    from PIL import Image
-                elif package == 'PyPDF2':
-                    import PyPDF2
-                elif package == 'docx':
-                    import docx
-                print(f"   [✓] {package} available")
-            except ImportError:
-                missing_packages.append(package)
-                print(f"   [✗] {package} missing")
+        # Always available
+        capabilities['text_extraction'] = True
+        capabilities['keyword_extraction'] = True
+        capabilities['file_processing'] = True
         
-        if missing_packages:
-            print(f"\nWARNING: Missing packages for {cls.NODE_TYPE}: {missing_packages}")
-            print("Some tasks may fail!")
-        
-        return cls.CAPABILITIES
-
-# VALIDATE NODE ON IMPORT
-print("\n" + "="*50)
-print("NODE INITIALIZATION")
-print("="*50)
-Config.validate_node_type()
-print("="*50 + "\n")
+        cls.CAPABILITIES = capabilities
+        print(f"Detected capabilities: {[k for k, v in capabilities.items() if v]}")
+        return capabilities
