@@ -387,6 +387,32 @@ def upload_file():
         logger.error(f"❌ Stack trace: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
     
+@app.route('/api/job-stats')
+def get_job_stats():
+    """Get detailed job distribution statistics"""
+    try:
+        task_stats = task_manager.get_stats()
+        
+        # Enhanced node information with job stats
+        nodes_with_stats = []
+        for node_id, job_stats in task_stats.get('node_job_stats', {}).items():
+            node_info = {
+                'node_id': node_id,
+                'job_stats': job_stats,
+                'current_load': task_stats['peer_load'].get(node_id, 0),
+                'is_self': node_id == peer_node.node_id
+            }
+            nodes_with_stats.append(node_info)
+        
+        return jsonify({
+            'job_distribution': task_stats.get('job_distribution', {}),
+            'nodes_with_stats': nodes_with_stats,
+            'total_jobs_processed': task_stats['total_tasks_processed'],
+            'timestamp': time.time()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
 @app.route('/api/debug/peers')
 def debug_peers():
     """Debug peer information"""

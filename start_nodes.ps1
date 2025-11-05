@@ -10,7 +10,7 @@ Start-Process powershell -ArgumentList "-NoExit -Command `"`$env:UPLOAD_FOLDER='
 Start-Sleep 3
 
 # Start Node 2  
-Start-Process powershell -ArgumentList "-NoExit -Command `"`$env:UPLOAD_FOLDER='uploads_5001'; `$env:PROCESSED_FOLDER='processed_5001'; `$env:INDEX_FOLDER='index_5001'; python main.py`""
+Start-Process powershell -ArgumentList "-NoExiat -Command `"`$env:UPLOAD_FOLDER='uploads_5001'; `$env:PROCESSED_FOLDER='processed_5001'; `$env:INDEX_FOLDER='index_5001'; python main.py`""
 Start-Sleep 3
 
 # Start Node 3

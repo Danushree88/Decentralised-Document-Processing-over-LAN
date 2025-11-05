@@ -86,6 +86,91 @@
         </div>
     </div>
 
+    <!-- Add this card to your nodes.html after the network statistics -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5><i class="fas fa-chart-pie"></i> Job Distribution</h5>
+    </div>
+    <div class="card-body">
+        <div id="jobDistribution">
+            <div class="text-center">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading job stats...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Job distribution functions
+async function loadJobStats() {
+    try {
+        const response = await fetch('/api/job-stats');
+        const data = await response.json();
+        updateJobDistribution(data);
+    } catch (error) {
+        console.error('Error loading job stats:', error);
+        document.getElementById('jobDistribution').innerHTML = 
+            '<div class="alert alert-warning">Unable to load job statistics</div>';
+    }
+}
+
+function updateJobDistribution(data) {
+    const container = document.getElementById('jobDistribution');
+    
+    if (!data.nodes_with_stats || data.nodes_with_stats.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">No job statistics available yet</p>';
+        return;
+    }
+    
+    let html = '<div class="row">';
+    
+    data.nodes_with_stats.forEach(node => {
+        const jobStats = node.job_stats;
+        const completionRate = (jobStats.completion_rate * 100).toFixed(1);
+        
+        html += `
+            <div class="col-md-6 mb-3">
+                <div class="card ${node.is_self ? 'border-primary' : ''}">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            ${node.node_id} 
+                            ${node.is_self ? '<span class="badge bg-primary">This Node</span>' : ''}
+                        </h6>
+                        
+                        <div class="mb-2">
+                            <strong>Total Jobs:</strong> ${jobStats.total_jobs}<br>
+                            <strong>Completion Rate:</strong> ${completionRate}%<br>
+                            <strong>Current Load:</strong> ${node.current_load} tasks
+                        </div>
+                        
+                        <div class="job-types">
+                            <strong>Job Types:</strong>
+                            ${Object.entries(jobStats.job_types || {}).map(([type, count]) => 
+                                `<span class="badge bg-secondary me-1">${type}: ${count}</span>`
+                            ).join('')}
+                        </div>
+                        
+                        ${jobStats.last_active ? 
+                            `<small class="text-muted">Last active: ${new Date(jobStats.last_active * 1000).toLocaleString()}</small>` 
+                            : ''
+                        }
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+// Auto-refresh job stats
+setInterval(loadJobStats, 5000);
+loadJobStats(); // Load on page load
+</script>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Load nodes function

@@ -32,6 +32,15 @@ class TaskManager:
         self.file_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.file_socket.bind(('0.0.0.0', Config.FILE_PORT))
         self.file_socket.listen(5)
+
+        self.node_job_stats = defaultdict(lambda: {
+        'total_jobs': 0,
+        'completed_jobs': 0,
+        'failed_jobs': 0,
+        'job_types': defaultdict(int),
+        'total_processing_time': 0,
+        'last_job_time': None
+    })
         
         # Start servers
         self.running = True
@@ -42,6 +51,70 @@ class TaskManager:
         
         logging.info(f"✅ Task Manager started on ports {Config.TASK_PORT} (tasks) and {Config.FILE_PORT} (files)")
 
+    # Enhanced _handle_task_result method
+    def _handle_task_result(self, task_id, result, peer_id):
+        """Handle completed task result with job tracking"""
+        with self.lock:
+            if task_id in self.pending_tasks:
+                task_info = self.pending_tasks[task_id]
+                
+                if result['success']:
+                    # Update job statistics
+                    self.node_job_stats[peer_id]['total_jobs'] += 1
+                    self.node_job_stats[peer_id]['completed_jobs'] += 1
+                    self.node_job_stats[peer_id]['job_types'][task_info['task_data']['task_type']] += 1
+                    self.node_job_stats[peer_id]['last_job_time'] = time.time()
+                    
+                    # Add to search index
+                    file_id = str(uuid.uuid4())
+                    index_success = self.search_index.add_document(
+                        file_id=file_id,
+                        file_name=result['metadata']['file_name'],
+                        content=result['text'],
+                        keywords=result['keywords'],
+                        metadata=result['metadata'],
+                        node_id=peer_id  # Track which node processed it
+                    )
+                    
+                    if index_success:
+                        self.completed_tasks[task_id] = {
+                            'task_info': task_info,
+                            'result': result,
+                            'completion_time': time.time(),
+                            'processed_by': peer_id
+                        }
+                        logging.info(f"📝 Successfully indexed document from peer {peer_id}")
+                
+                del self.pending_tasks[task_id]
+                self.peer_load[peer_id] = max(0, self.peer_load[peer_id] - 1)
+
+    # Enhanced get_stats method
+    def get_stats(self):
+        """Get task manager statistics with job distribution"""
+        with self.lock:
+            return {
+                'pending_tasks': len(self.pending_tasks),
+                'completed_tasks': len(self.completed_tasks),
+                'failed_tasks': len(self.failed_tasks),
+                'queued_tasks': len(self.task_queue),
+                'peer_load': dict(self.peer_load),
+                'connected_peers': len(self.peer_capabilities),
+                'total_tasks_processed': len(self.completed_tasks) + len(self.failed_tasks),
+                'node_job_stats': dict(self.node_job_stats),  # Add job distribution stats
+                'job_distribution': self._get_job_distribution_summary()
+            }
+
+    def _get_job_distribution_summary(self):
+        """Get summary of job distribution across nodes"""
+        summary = {}
+        for node_id, stats in self.node_job_stats.items():
+            summary[node_id] = {
+                'total_jobs': stats['total_jobs'],
+                'completion_rate': stats['completed_jobs'] / max(1, stats['total_jobs']),
+                'job_types': dict(stats['job_types']),
+                'last_active': stats['last_job_time']
+            }
+        return summary
     def _task_server(self):
         """Handle incoming task requests"""
         while self.running:

@@ -24,28 +24,75 @@ def get_local_ip():
             except:
                 return '127.0.0.1'
 
+# config.py
 class Config:
     # Network Configuration
     BROADCAST_PORT = 8888
     TASK_PORT = 8889
     FILE_PORT = 8890
     BROADCAST_ADDR = "255.255.255.255"
-    HEARTBEAT_INTERVAL = 5  # seconds
-    TASK_TIMEOUT = 30  # seconds
+    HEARTBEAT_INTERVAL = 5
     
-    # File Processing
-    UPLOAD_FOLDER = 'uploads'
-    PROCESSED_FOLDER = 'processed'
-    INDEX_FOLDER = 'search_index'
-    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-    
-    # Node Capabilities
+    # Node Capabilities (Dynamically detected)
     CAPABILITIES = {
-        'text_extraction': True,
-        'file_processing': True,
-        'ocr': True,  # Enable OCR if available
-        'nlp': True,  # Enable NLP if available
-        'storage': 1000,  # MB available
-        'cpu_cores': 4,  # Estimated CPU cores
-        'memory_mb': 4096  # Estimated memory
+        'ocr': False,
+        'text_extraction': False,
+        'nlp': False,
+        'summarization': False,
+        'keyword_extraction': False,
+        'entity_recognition': False,
+        'topic_modeling': False,
+        'file_processing': False
     }
+    
+    # File type mappings
+    FILE_TYPE_TASKS = {
+        '.pdf': ['ocr', 'text_extraction', 'keyword_extraction'],
+        '.doc': ['text_extraction', 'keyword_extraction'],
+        '.docx': ['text_extraction', 'keyword_extraction'],
+        '.txt': ['text_extraction', 'nlp', 'summarization'],
+        '.jpg': ['ocr', 'keyword_extraction'],
+        '.png': ['ocr', 'keyword_extraction'],
+        '.jpeg': ['ocr', 'keyword_extraction']
+    }
+    
+    @classmethod
+    def detect_capabilities(cls):
+        """Dynamically detect what this node can do"""
+        capabilities = cls.CAPABILITIES.copy()
+        
+        # Detect OCR capability
+        try:
+            import pytesseract
+            capabilities['ocr'] = True
+        except ImportError:
+            try:
+                import tesseract
+                capabilities['ocr'] = True
+            except ImportError:
+                capabilities['ocr'] = False
+        
+        # Detect NLP capabilities
+        try:
+            import spacy
+            capabilities['nlp'] = True
+            capabilities['entity_recognition'] = True
+        except ImportError:
+            capabilities['nlp'] = False
+            capabilities['entity_recognition'] = False
+        
+        try:
+            from sumy.parsers.plaintext import PlaintextParser
+            from sumy.nlp.tokenizers import Tokenizer
+            capabilities['summarization'] = True
+        except ImportError:
+            capabilities['summarization'] = False
+        
+        # Always available
+        capabilities['text_extraction'] = True
+        capabilities['keyword_extraction'] = True
+        capabilities['file_processing'] = True
+        
+        cls.CAPABILITIES = capabilities
+        print(f"🔍 Detected capabilities: {[k for k, v in capabilities.items() if v]}")
+        return capabilities

@@ -36,117 +36,122 @@
         </div>
     </nav>
 
-    <!-- Debug Panel -->
-<div class="container mt-2">
-    <div class="alert alert-warning alert-dismissible fade show" role="alert">
-        <strong>Debug Mode</strong> 
-        <button class="btn btn-sm btn-outline-danger ms-2" onclick="runSystemDiagnostics()">
-            <i class="fas fa-bug"></i> Run Diagnostics
-        </button>
-        <button class="btn btn-sm btn-outline-info ms-2" onclick="testUpload()">
-            <i class="fas fa-upload"></i> Test Upload
-        </button>
-        <button class="btn btn-sm btn-outline-success ms-2" onclick="testSearch()">
-            <i class="fas fa-search"></i> Test Search
-        </button>
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    
+    <!-- 
+    ====================================
+    DEBUG PANEL - COMMENTED OUT
+    ====================================
+    <div class="container mt-2">
+        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+            <strong>Debug Mode</strong> 
+            <button class="btn btn-sm btn-outline-danger ms-2" onclick="runSystemDiagnostics()">
+                <i class="fas fa-bug"></i> Run Diagnostics
+            </button>
+            <button class="btn btn-sm btn-outline-info ms-2" onclick="testUpload()">
+                <i class="fas fa-upload"></i> Test Upload
+            </button>
+            <button class="btn btn-sm btn-outline-success ms-2" onclick="testSearch()">
+                <i class="fas fa-search"></i> Test Search
+            </button>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
     </div>
-</div>
 
-<div id="debug-results" class="container mt-3"></div>
+    <div id="debug-results" class="container mt-3"></div>
 
-<script>
-// Debug functions
-async function runSystemDiagnostics() {
-    logToConsole('🔧 Running system diagnostics...');
-    
-    try {
-        const response = await fetch('/api/debug/system-status');
-        const data = await response.json();
+    <script>
+    // Debug functions - COMMENTED OUT
+    async function runSystemDiagnostics() {
+        logToConsole('🔧 Running system diagnostics...');
         
-        document.getElementById('debug-results').innerHTML = `
-            <div class="card">
-                <div class="card-header bg-info text-white">
-                    <h5><i class="fas fa-bug"></i> System Diagnostics</h5>
+        try {
+            const response = await fetch('/api/debug/system-status');
+            const data = await response.json();
+            
+            document.getElementById('debug-results').innerHTML = `
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h5><i class="fas fa-bug"></i> System Diagnostics</h5>
+                    </div>
+                    <div class="card-body">
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <pre>${JSON.stringify(data, null, 2)}</pre>
-                </div>
-            </div>
-        `;
-        
-        logToConsole('✅ Diagnostics completed');
-    } catch (error) {
-        logToConsole('❌ Diagnostics failed: ' + error.message);
-    }
-}
-
-async function testUpload() {
-    logToConsole('🧪 Testing upload with sample file...');
-    
-    // Create a test file
-    const testContent = "This is a test document for the decentralized document processing system. It contains sample text to verify that upload and processing are working correctly.";
-    const blob = new Blob([testContent], { type: 'text/plain' });
-    const file = new File([blob], 'test_document.txt', { type: 'text/plain' });
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    try {
-        const response = await fetch('/api/upload', {
-            method: 'POST',
-            body: formData
-        });
-        const result = await response.json();
-        
-        if (result.success) {
-            logToConsole('✅ Test upload successful!');
-            // Refresh stats
-            loadAllStats();
-            // Wait a bit then check documents
-            setTimeout(() => {
-                checkDocuments();
-            }, 1000);
-        } else {
-            logToConsole('❌ Test upload failed: ' + result.error);
+            `;
+            
+            logToConsole('✅ Diagnostics completed');
+        } catch (error) {
+            logToConsole('❌ Diagnostics failed: ' + error.message);
         }
-    } catch (error) {
-        logToConsole('❌ Test upload error: ' + error.message);
     }
-}
 
-async function testSearch() {
-    logToConsole('🧪 Testing search functionality...');
-    
-    try {
-        const response = await fetch('/api/search?q=test&limit=5');
-        const data = await response.json();
+    async function testUpload() {
+        logToConsole('🧪 Testing upload with sample file...');
         
-        if (data.results) {
-            logToConsole(`✅ Search test found ${data.results.length} results`);
-        } else {
-            logToConsole('❌ Search test failed');
+        // Create a test file
+        const testContent = "This is a test document for the decentralized document processing system. It contains sample text to verify that upload and processing are working correctly.";
+        const blob = new Blob([testContent], { type: 'text/plain' });
+        const file = new File([blob], 'test_document.txt', { type: 'text/plain' });
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        try {
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                logToConsole('✅ Test upload successful!');
+                // Refresh stats
+                loadAllStats();
+                // Wait a bit then check documents
+                setTimeout(() => {
+                    checkDocuments();
+                }, 1000);
+            } else {
+                logToConsole('❌ Test upload failed: ' + result.error);
+            }
+        } catch (error) {
+            logToConsole('❌ Test upload error: ' + error.message);
         }
-    } catch (error) {
-        logToConsole('❌ Search test error: ' + error.message);
     }
-}
 
-async function checkDocuments() {
-    try {
-        const response = await fetch('/api/documents');
-        const data = await response.json();
-        logToConsole(`📊 Current documents in system: ${data.documents.length}`);
-    } catch (error) {
-        logToConsole('❌ Error checking documents: ' + error.message);
+    async function testSearch() {
+        logToConsole('🧪 Testing search functionality...');
+        
+        try {
+            const response = await fetch('/api/search?q=test&limit=5');
+            const data = await response.json();
+            
+            if (data.results) {
+                logToConsole(`✅ Search test found ${data.results.length} results`);
+            } else {
+                logToConsole('❌ Search test failed');
+            }
+        } catch (error) {
+            logToConsole('❌ Search test error: ' + error.message);
+        }
     }
-}
 
-// Auto-run diagnostics on page load after a delay
-setTimeout(() => {
-    runSystemDiagnostics();
-}, 2000);
-</script>
+    async function checkDocuments() {
+        try {
+            const response = await fetch('/api/documents');
+            const data = await response.json();
+            logToConsole(`📊 Current documents in system: ${data.documents.length}`);
+        } catch (error) {
+            logToConsole('❌ Error checking documents: ' + error.message);
+        }
+    }
+
+    // Auto-run diagnostics on page load after a delay
+    setTimeout(() => {
+        runSystemDiagnostics();
+    }, 2000);
+    </script>
+    -->
 
     <div class="container mt-4">
         <div class="row">
@@ -278,45 +283,49 @@ setTimeout(() => {
                 </div>
             </div>
         </div>
-    </div>
+    </div> 
 
-    <!-- Add this to your dashboard after the stats cards -->
-<div class="row mt-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5><i class="fas fa-tasks"></i> Active Task Distribution</h5>
-                <span id="task-refresh" class="btn btn-sm btn-outline-secondary">
-                    <i class="fas fa-sync-alt"></i>
-                </span>
-            </div>
-            <div class="card-body">
-                <div id="task-distribution-status">
-                    <div class="text-center">
-                        <div class="spinner-border" role="status">
-                            <span class="visually-hidden">Loading tasks...</span>
-                        </div>
-                    </div>
+    <!-- 
+    ====================================
+    TASK DISTRIBUTION SECTION - COMMENTED OUT
+    ====================================
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5><i class="fas fa-tasks"></i> Active Task Distribution</h5>
+                    <span id="task-refresh" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-sync-alt"></i>
+                    </span>
                 </div>
-                
-                <div class="row mt-3">
-                    <div class="col-md-6">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6>Distribution Strategy</h6>
-                                <p class="mb-1"><small>Automatic load balancing across nodes</small></p>
-                                <p class="mb-1"><small>Capability-based task assignment</small></p>
-                                <p class="mb-0"><small>Fallback to local processing</small></p>
+                <div class="card-body">
+                    <div id="task-distribution-status">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading tasks...</span>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-6">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6>Current Load</h6>
-                                <div id="load-distribution">
-                                    <div class="spinner-border spinner-border-sm" role="status">
-                                        <span class="visually-hidden">Loading...</span>
+                    
+                    <div class="row mt-3">
+                        <div class="col-md-6">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h6>Distribution Strategy</h6>
+                                    <p class="mb-1"><small>Automatic load balancing across nodes</small></p>
+                                    <p class="mb-1"><small>Capability-based task assignment</small></p>
+                                    <p class="mb-0"><small>Fallback to local processing</small></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <h6>Current Load</h6>
+                                    <div id="load-distribution">
+                                        <div class="spinner-border spinner-border-sm" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -326,107 +335,107 @@ setTimeout(() => {
             </div>
         </div>
     </div>
-</div>
 
-<script>
-// Task monitoring functions
-async function loadTaskStatus() {
-    try {
-        const response = await fetch('/api/tasks');
-        const data = await response.json();
-        
-        updateTaskDisplay(data);
-        updateLoadDistribution(data.stats);
-        
-    } catch (error) {
-        console.error('Error loading task status:', error);
-        document.getElementById('task-distribution-status').innerHTML = 
-            '<div class="alert alert-warning">Unable to load task status</div>';
+    <script>
+    // Task monitoring functions - COMMENTED OUT
+    async function loadTaskStatus() {
+        try {
+            const response = await fetch('/api/tasks');
+            const data = await response.json();
+            
+            updateTaskDisplay(data);
+            updateLoadDistribution(data.stats);
+            
+        } catch (error) {
+            console.error('Error loading task status:', error);
+            document.getElementById('task-distribution-status').innerHTML = 
+                '<div class="alert alert-warning">Unable to load task status</div>';
+        }
     }
-}
 
-function updateTaskDisplay(data) {
-    const container = document.getElementById('task-distribution-status');
-    
-    if (!data.pending_tasks || data.pending_tasks.length === 0) {
-        container.innerHTML = `
-            <div class="alert alert-success text-center">
-                <i class="fas fa-check-circle"></i>
-                <h6>No Active Tasks</h6>
-                <p class="mb-0">All tasks have been processed</p>
-            </div>
-        `;
-        return;
-    }
-    
-    let html = '<div class="row">';
-    
-    data.pending_tasks.forEach(task => {
-        const statusClass = {
-            'queued': 'warning',
-            'distributing': 'info',
-            'distributed': 'success',
-            'distribution_failed': 'danger'
-        }[task.status] || 'secondary';
+    function updateTaskDisplay(data) {
+        const container = document.getElementById('task-distribution-status');
         
-        const statusText = {
-            'queued': 'Waiting for distribution',
-            'distributing': 'Distributing to peer...',
-            'distributed': 'Processing on peer',
-            'distribution_failed': 'Distribution failed'
-        }[task.status] || task.status;
+        if (!data.pending_tasks || data.pending_tasks.length === 0) {
+            container.innerHTML = `
+                <div class="alert alert-success text-center">
+                    <i class="fas fa-check-circle"></i>
+                    <h6>No Active Tasks</h6>
+                    <p class="mb-0">All tasks have been processed</p>
+                </div>
+            `;
+            return;
+        }
         
-        html += `
-            <div class="col-md-6 mb-3">
-                <div class="card">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start">
-                            <div>
-                                <h6 class="card-title">${task.file_name}</h6>
-                                <p class="card-text mb-1">
-                                    <span class="badge bg-${statusClass}">${statusText}</span>
-                                    ${task.peer_id ? `<br><small>Peer: ${task.peer_id}</small>` : ''}
-                                </p>
-                            </div>
-                            <div class="text-end">
-                                <small class="text-muted">Attempts: ${task.attempts}</small>
+        let html = '<div class="row">';
+        
+        data.pending_tasks.forEach(task => {
+            const statusClass = {
+                'queued': 'warning',
+                'distributing': 'info',
+                'distributed': 'success',
+                'distribution_failed': 'danger'
+            }[task.status] || 'secondary';
+            
+            const statusText = {
+                'queued': 'Waiting for distribution',
+                'distributing': 'Distributing to peer...',
+                'distributed': 'Processing on peer',
+                'distribution_failed': 'Distribution failed'
+            }[task.status] || task.status;
+            
+            html += `
+                <div class="col-md-6 mb-3">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h6 class="card-title">${task.file_name}</h6>
+                                    <p class="card-text mb-1">
+                                        <span class="badge bg-${statusClass}">${statusText}</span>
+                                        ${task.peer_id ? `<br><small>Peer: ${task.peer_id}</small>` : ''}
+                                    </p>
+                                </div>
+                                <div class="text-end">
+                                    <small class="text-muted">Attempts: ${task.attempts}</small>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
-        `;
-    });
-    
-    html += '</div>';
-    container.innerHTML = html;
-}
-
-function updateLoadDistribution(stats) {
-    const container = document.getElementById('load-distribution');
-    
-    let html = '';
-    if (stats.peer_load && Object.keys(stats.peer_load).length > 0) {
-        for (const [peerId, load] of Object.entries(stats.peer_load)) {
-            const shortId = peerId.length > 15 ? peerId.substring(0, 15) + '...' : peerId;
-            html += `<div class="mb-1">
-                <small>${shortId}: <span class="badge ${load > 0 ? 'bg-warning' : 'bg-success'}">${load} tasks</span></small>
-            </div>`;
-        }
-    } else {
-        html = '<p class="text-muted mb-0">No active peer load</p>';
+            `;
+        });
+        
+        html += '</div>';
+        container.innerHTML = html;
     }
-    
-    container.innerHTML = html;
-}
 
-// Auto-refresh tasks
-setInterval(loadTaskStatus, 3000);
-document.getElementById('task-refresh').addEventListener('click', loadTaskStatus);
+    function updateLoadDistribution(stats) {
+        const container = document.getElementById('load-distribution');
+        
+        let html = '';
+        if (stats.peer_load && Object.keys(stats.peer_load).length > 0) {
+            for (const [peerId, load] of Object.entries(stats.peer_load)) {
+                const shortId = peerId.length > 15 ? peerId.substring(0, 15) + '...' : peerId;
+                html += `<div class="mb-1">
+                    <small>${shortId}: <span class="badge ${load > 0 ? 'bg-warning' : 'bg-success'}">${load} tasks</span></small>
+                </div>`;
+            }
+        } else {
+            html = '<p class="text-muted mb-0">No active peer load</p>';
+        }
+        
+        container.innerHTML = html;
+    }
 
-// Load on page load
-loadTaskStatus();
-</script>
+    // Auto-refresh tasks - COMMENTED OUT
+    // setInterval(loadTaskStatus, 3000);
+    // document.getElementById('task-refresh').addEventListener('click', loadTaskStatus);
+
+    // Load on page load - COMMENTED OUT
+    // loadTaskStatus();
+    </script>
+    -->
 
     <!-- Add Socket.IO client library -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -446,7 +455,7 @@ loadTaskStatus();
             document.getElementById('console-output').innerHTML = '<div>> Console cleared</div>';
         }
 
-        // Test API functions
+        // Test API functions - KEPT ACTIVE
         async function testAPI(apiType) {
             logToConsole(`🧪 Testing ${apiType} API...`);
             
