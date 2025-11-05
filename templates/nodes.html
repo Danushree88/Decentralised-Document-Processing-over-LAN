@@ -6,12 +6,46 @@
     <title>Network Nodes - Document Processor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .node-card {
+            transition: transform 0.2s;
+        }
+        .node-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .capability-badge {
+            font-size: 0.7em;
+            margin: 1px;
+        }
+        .load-bar {
+            height: 8px;
+            border-radius: 4px;
+            margin-top: 5px;
+        }
+        .job-timeline {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .timeline-item {
+            padding: 8px;
+            border-left: 3px solid #0d6efd;
+            margin-bottom: 5px;
+            background: #f8f9fa;
+        }
+        .stats-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+        }
+    </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
             <a class="navbar-brand" href="/">
-                <i class="fas fa-network-wired"></i> DocProcessor
+                <i class="fas fa-network-wired"></i> DocProcessor Network
             </a>
             <div class="navbar-nav ms-auto">
                 <a class="nav-link" href="/">Dashboard</a>
@@ -23,60 +57,112 @@
     </nav>
 
     <div class="container mt-4">
+        <!-- Network Overview Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stats-card p-3 text-center">
+                    <h3 id="totalNodes">0</h3>
+                    <p class="mb-0">Total Nodes</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card p-3 text-center" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                    <h3 id="totalJobs">0</h3>
+                    <p class="mb-0">Total Jobs</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card p-3 text-center" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                    <h3 id="activeTasks">0</h3>
+                    <p class="mb-0">Active Tasks</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card p-3 text-center" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                    <h3 id="successRate">0%</h3>
+                    <p class="mb-0">Success Rate</p>
+                </div>
+            </div>
+        </div>
+
         <div class="row">
             <div class="col-12">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h4><i class="fas fa-network-wired"></i> Network Nodes</h4>
-                        <button id="refreshNodes" class="btn btn-sm btn-primary">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
+                        <div>
+                            <button id="refreshNodes" class="btn btn-sm btn-primary">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                            <span class="badge bg-secondary ms-2" id="lastUpdated">Just now</span>
+                        </div>
                     </div>
                     <div class="card-body">
-                        <div class="alert alert-info">
-                            <i class="fas fa-sync-alt"></i> Node discovery is automatic. The system will find other nodes on the LAN.
-                            <span id="lastUpdated" class="float-end"></span>
-                        </div>
-                        
                         <div id="nodesContainer">
-                            <div class="text-center">
-                                <div class="spinner-border" role="status">
+                            <div class="text-center py-4">
+                                <div class="spinner-border text-primary" role="status">
                                     <span class="visually-hidden">Loading nodes...</span>
                                 </div>
-                                <p class="mt-2">Discovering nodes on the network...</p>
+                                <p class="mt-2 text-muted">Discovering nodes on the network...</p>
                             </div>
                         </div>
                     </div>
                 </div>
-                
-                <div class="card mt-4">
+            </div>
+        </div>
+
+        <!-- Job Distribution & Analytics -->
+        <div class="row mt-4">
+            <div class="col-md-8">
+                <div class="card">
                     <div class="card-header">
-                        <h5><i class="fas fa-info-circle"></i> Network Information</h5>
+                        <h5><i class="fas fa-chart-pie"></i> Job Distribution Analytics</h5>
                     </div>
                     <div class="card-body">
                         <div class="row">
                             <div class="col-md-6">
-                                <div class="card bg-light">
-                                    <div class="card-body">
-                                        <h6>This Node</h6>
-                                        <div id="thisNodeInfo">
-                                            <div class="spinner-border spinner-border-sm" role="status">
-                                                <span class="visually-hidden">Loading...</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+                                <canvas id="jobDistributionChart" width="400" height="300"></canvas>
                             </div>
                             <div class="col-md-6">
-                                <div class="card bg-light">
-                                    <div class="card-body">
-                                        <h6>Network Status</h6>
-                                        <div id="networkStats">
-                                            <div class="spinner-border spinner-border-sm" role="status">
-                                                <span class="visually-hidden">Loading...</span>
-                                            </div>
-                                        </div>
-                                    </div>
+                                <canvas id="taskTypeChart" width="400" height="300"></canvas>
+                            </div>
+                        </div>
+                        <div id="jobDistributionDetails" class="mt-3">
+                            <!-- Dynamic job stats will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-history"></i> Recent Job Timeline</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="jobTimeline" class="job-timeline">
+                            <div class="text-center text-muted py-3">
+                                <i class="fas fa-clock fa-2x mb-2"></i>
+                                <p>No recent jobs</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Node Performance Metrics -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-tachometer-alt"></i> Node Performance Metrics</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="performanceMetrics">
+                            <div class="text-center">
+                                <div class="spinner-border" role="status">
+                                    <span class="visually-hidden">Loading metrics...</span>
                                 </div>
                             </div>
                         </div>
@@ -85,228 +171,443 @@
             </div>
         </div>
     </div>
-
-    <!-- Add this card to your nodes.html after the network statistics -->
-<div class="card mt-4">
-    <div class="card-header">
-        <h5><i class="fas fa-chart-pie"></i> Job Distribution</h5>
-    </div>
-    <div class="card-body">
-        <div id="jobDistribution">
-            <div class="text-center">
-                <div class="spinner-border" role="status">
-                    <span class="visually-hidden">Loading job stats...</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-// Job distribution functions
-async function loadJobStats() {
-    try {
-        const response = await fetch('/api/job-stats');
-        const data = await response.json();
-        updateJobDistribution(data);
-    } catch (error) {
-        console.error('Error loading job stats:', error);
-        document.getElementById('jobDistribution').innerHTML = 
-            '<div class="alert alert-warning">Unable to load job statistics</div>';
-    }
-}
-
-function updateJobDistribution(data) {
-    const container = document.getElementById('jobDistribution');
-    
-    if (!data.nodes_with_stats || data.nodes_with_stats.length === 0) {
-        container.innerHTML = '<p class="text-muted text-center">No job statistics available yet</p>';
-        return;
-    }
-    
-    let html = '<div class="row">';
-    
-    data.nodes_with_stats.forEach(node => {
-        const jobStats = node.job_stats;
-        const completionRate = (jobStats.completion_rate * 100).toFixed(1);
-        
-        html += `
-            <div class="col-md-6 mb-3">
-                <div class="card ${node.is_self ? 'border-primary' : ''}">
-                    <div class="card-body">
-                        <h6 class="card-title">
-                            ${node.node_id} 
-                            ${node.is_self ? '<span class="badge bg-primary">This Node</span>' : ''}
-                        </h6>
-                        
-                        <div class="mb-2">
-                            <strong>Total Jobs:</strong> ${jobStats.total_jobs}<br>
-                            <strong>Completion Rate:</strong> ${completionRate}%<br>
-                            <strong>Current Load:</strong> ${node.current_load} tasks
-                        </div>
-                        
-                        <div class="job-types">
-                            <strong>Job Types:</strong>
-                            ${Object.entries(jobStats.job_types || {}).map(([type, count]) => 
-                                `<span class="badge bg-secondary me-1">${type}: ${count}</span>`
-                            ).join('')}
-                        </div>
-                        
-                        ${jobStats.last_active ? 
-                            `<small class="text-muted">Last active: ${new Date(jobStats.last_active * 1000).toLocaleString()}</small>` 
-                            : ''
-                        }
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-    
-    html += '</div>';
-    container.innerHTML = html;
-}
-
-// Auto-refresh job stats
-setInterval(loadJobStats, 5000);
-loadJobStats(); // Load on page load
-</script>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Load nodes function
+        let jobDistributionChart = null;
+        let taskTypeChart = null;
+        let recentJobs = [];
+
+        // Load comprehensive node data
         async function loadNodes() {
             try {
-                const response = await fetch('/api/debug/peers');
-                const data = await response.json();
+                const [peersResponse, jobStatsResponse, systemStatsResponse] = await Promise.all([
+                    fetch('/api/debug/peers'),
+                    fetch('/api/job-stats'),
+                    fetch('/api/stats')
+                ]);
+
+                const peersData = await peersResponse.json();
+                const jobStatsData = await jobStatsResponse.json();
+                const systemStats = await systemStatsResponse.json();
+
+                updateNetworkOverview(peersData, jobStatsData, systemStats);
+                updateNodesDisplay(peersData, jobStatsData);
+                updateJobDistribution(jobStatsData);
+                updatePerformanceMetrics(peersData, jobStatsData, systemStats);
+                updateLastUpdated();
+
+            } catch (error) {
+                console.error('Error loading node data:', error);
+                showError('Failed to load node information');
+            }
+        }
+
+        function updateNetworkOverview(peersData, jobStatsData, systemStats) {
+            const totalNodes = Object.keys(peersData.peers || {}).length + 1; // +1 for self
+            const totalJobs = jobStatsData.total_jobs_processed || 0;
+            const activeTasks = systemStats.task_stats?.pending_tasks || 0;
+            const successRate = calculateSuccessRate(jobStatsData);
+
+            document.getElementById('totalNodes').textContent = totalNodes;
+            document.getElementById('totalJobs').textContent = totalJobs;
+            document.getElementById('activeTasks').textContent = activeTasks;
+            document.getElementById('successRate').textContent = successRate + '%';
+        }
+
+        function calculateSuccessRate(jobStatsData) {
+            let totalJobs = 0;
+            let completedJobs = 0;
+
+            Object.values(jobStatsData.job_distribution || {}).forEach(node => {
+                totalJobs += node.total_jobs || 0;
+                completedJobs += Math.floor((node.completion_rate || 0) * (node.total_jobs || 0));
+            });
+
+            return totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 100) : 0;
+        }
+
+        function updateNodesDisplay(peersData, jobStatsData) {
+            const container = document.getElementById('nodesContainer');
+            const jobStats = jobStatsData.job_distribution || {};
+            const nodesWithStats = jobStatsData.nodes_with_stats || [];
+
+            let html = '';
+
+            // This Node (Always first)
+            const thisNodeStats = jobStats[peersData.node_id] || {};
+            const thisNodeDetailed = nodesWithStats.find(n => n.node_id === peersData.node_id);
+            
+            html += createNodeCard({
+                id: peersData.node_id,
+                ip: peersData.local_ip,
+                isSelf: true,
+                isLeader: peersData.is_leader,
+                capabilities: { text_extraction: true, file_processing: true, keyword_extraction: true },
+                jobStats: thisNodeStats,
+                detailedStats: thisNodeDetailed,
+                load: 0 // Coordinator doesn't process locally
+            });
+
+            // Peer Nodes
+            for (const [peerId, peerInfo] of Object.entries(peersData.peers || {})) {
+                const peerStats = jobStats[peerId] || {};
+                const peerDetailed = nodesWithStats.find(n => n.node_id === peerId);
                 
-                const container = document.getElementById('nodesContainer');
-                const lastUpdated = document.getElementById('lastUpdated');
-                
-                lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-                
-                // Always show this node
-                let html = `
-                    <div class="card mb-3 border-primary">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <div class="flex-grow-1">
-                                    <h5 class="card-title">
-                                        ${data.node_id}
-                                        <span class="badge bg-primary">This Node</span>
-                                        ${data.is_leader ? '<span class="badge bg-success">Leader</span>' : ''}
-                                    </h5>
-                                    <p class="card-text mb-1">
-                                        <strong>IP:</strong> ${data.local_ip}<br>
-                                        <strong>Status:</strong> <span class="badge bg-success">Active</span><br>
-                                        <strong>Role:</strong> ${data.is_leader ? 'Coordinator' : 'Worker'}
-                                    </p>
-                                    <div class="mt-2">
-                                        <span class="badge bg-success me-1">Text Extraction</span>
-                                        <span class="badge bg-info me-1">File Processing</span>
+                html += createNodeCard({
+                    id: peerId,
+                    ip: peerInfo.ip,
+                    isSelf: false,
+                    isLeader: false,
+                    capabilities: peerInfo.capabilities || {},
+                    jobStats: peerStats,
+                    detailedStats: peerDetailed,
+                    load: peerInfo.load || 0
+                });
+            }
+
+            if (Object.keys(peersData.peers || {}).length === 0) {
+                html += `
+                    <div class="alert alert-warning text-center mt-3">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+                        <h5>No Other Nodes Found</h5>
+                        <p class="mb-2">This node is running in standalone mode.</p>
+                        <small class="text-muted">
+                            Other nodes on the same network will automatically appear here.
+                        </small>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function createNodeCard(node) {
+            const completionRate = (node.jobStats.completion_rate * 100) || 0;
+            const jobTypes = node.detailedStats?.job_stats?.job_types || {};
+            const lastActive = node.detailedStats?.job_stats?.last_active;
+            
+            return `
+                <div class="card node-card mb-3 ${node.isSelf ? 'border-primary' : ''}">
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <h5 class="card-title">
+                                    ${node.id.substring(0, 25)}...
+                                    ${node.isSelf ? '<span class="badge bg-primary ms-2">This Node</span>' : ''}
+                                    ${node.isLeader ? '<span class="badge bg-success ms-1">Leader</span>' : ''}
+                                </h5>
+                                <p class="card-text mb-2">
+                                    <strong>IP:</strong> ${node.ip}<br>
+                                    <strong>Status:</strong> <span class="badge bg-success">Active</span><br>
+                                    <strong>Current Load:</strong> ${node.load} tasks
+                                </p>
+                                
+                                <div class="mb-2">
+                                    <strong>Job Statistics:</strong><br>
+                                    • Total Jobs: ${node.jobStats.total_jobs || 0}<br>
+                                    • Completion Rate: ${completionRate.toFixed(1)}%<br>
+                                    • Last Active: ${lastActive ? new Date(lastActive * 1000).toLocaleString() : 'Never'}
+                                </div>
+
+                                <div class="mt-2">
+                                    <strong>Capabilities:</strong><br>
+                                    ${createCapabilityBadges(node.capabilities)}
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <div class="text-end">
+                                    <div class="mb-3">
+                                        <strong>Performance</strong>
+                                        <div class="progress load-bar">
+                                            <div class="progress-bar ${getLoadColor(completionRate)}" 
+                                                 style="width: ${completionRate}%">
+                                                ${completionRate}%
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="job-types-breakdown">
+                                        <strong>Job Types:</strong><br>
+                                        ${Object.entries(jobTypes).map(([type, count]) => 
+                                            `<span class="badge bg-secondary me-1 mb-1">${type}: ${count}</span>`
+                                        ).join('')}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function createCapabilityBadges(capabilities) {
+            const badgeMap = {
+                'text_extraction': { label: 'Text Extract', class: 'bg-success' },
+                'keyword_extraction': { label: 'Keywords', class: 'bg-info' },
+                'ocr': { label: 'OCR', class: 'bg-warning' },
+                'nlp': { label: 'NLP', class: 'bg-primary' },
+                'file_processing': { label: 'Files', class: 'bg-secondary' },
+                'entity_recognition': { label: 'NER', class: 'bg-dark' },
+                'summarization': { label: 'Summarize', class: 'bg-purple' }
+            };
+
+            return Object.entries(capabilities)
+                .filter(([cap, enabled]) => enabled)
+                .map(([cap, enabled]) => {
+                    const config = badgeMap[cap] || { label: cap, class: 'bg-secondary' };
+                    return `<span class="badge capability-badge ${config.class}">${config.label}</span>`;
+                })
+                .join(' ');
+        }
+
+        function getLoadColor(percentage) {
+            if (percentage >= 80) return 'bg-success';
+            if (percentage >= 60) return 'bg-info';
+            if (percentage >= 40) return 'bg-warning';
+            return 'bg-danger';
+        }
+
+        function updateJobDistribution(jobStatsData) {
+            updateJobCharts(jobStatsData);
+            updateJobDetails(jobStatsData);
+            updateJobTimeline(jobStatsData);
+        }
+
+        function updateJobCharts(jobStatsData) {
+            const distribution = jobStatsData.job_distribution || {};
+            const nodes = Object.keys(distribution);
+            const jobCounts = nodes.map(node => distribution[node].total_jobs || 0);
+            const completionRates = nodes.map(node => (distribution[node].completion_rate || 0) * 100);
+
+            // Job Distribution Chart
+            if (jobDistributionChart) jobDistributionChart.destroy();
+            const distributionCtx = document.getElementById('jobDistributionChart').getContext('2d');
+            jobDistributionChart = new Chart(distributionCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: nodes.map(node => node.substring(0, 15) + '...'),
+                    datasets: [{
+                        data: jobCounts,
+                        backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: { display: true, text: 'Job Distribution by Node' },
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+
+            // Task Type Chart
+            const taskTypes = {};
+            jobStatsData.nodes_with_stats?.forEach(node => {
+                Object.entries(node.job_stats?.job_types || {}).forEach(([type, count]) => {
+                    taskTypes[type] = (taskTypes[type] || 0) + count;
+                });
+            });
+
+            if (taskTypeChart) taskTypeChart.destroy();
+            const taskTypeCtx = document.getElementById('taskTypeChart').getContext('2d');
+            taskTypeChart = new Chart(taskTypeCtx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(taskTypes),
+                    datasets: [{
+                        label: 'Tasks Processed',
+                        data: Object.values(taskTypes),
+                        backgroundColor: '#36A2EB'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: { display: true, text: 'Tasks by Type' }
+                    }
+                }
+            });
+        }
+
+        function updateJobDetails(jobStatsData) {
+            const container = document.getElementById('jobDistributionDetails');
+            const nodesWithStats = jobStatsData.nodes_with_stats || [];
+
+            if (nodesWithStats.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center">No job statistics available</p>';
+                return;
+            }
+
+            let html = '<div class="row">';
+            nodesWithStats.forEach(node => {
+                const stats = node.job_stats;
+                html += `
+                    <div class="col-md-6 mb-3">
+                        <div class="card ${node.is_self ? 'border-primary' : ''}">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    ${node.node_id.substring(0, 20)}...
+                                    ${node.is_self ? '<span class="badge bg-primary">This Node</span>' : ''}
+                                </h6>
+                                <div class="row">
+                                    <div class="col-6">
+                                        <small><strong>Total:</strong> ${stats.total_jobs || 0}</small><br>
+                                        <small><strong>Completed:</strong> ${stats.completed_jobs || 0}</small><br>
+                                        <small><strong>Failed:</strong> ${stats.failed_jobs || 0}</small>
+                                    </div>
+                                    <div class="col-6">
+                                        <small><strong>Rate:</strong> ${((stats.completion_rate || 0) * 100).toFixed(1)}%</small><br>
+                                        <small><strong>Load:</strong> ${node.current_load || 0}</small>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 `;
-                
-                // Add peer nodes
-                const peerCount = Object.keys(data.peers).length;
-                
-                if (peerCount === 0) {
-                    html += `
-                        <div class="alert alert-warning text-center mt-3">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            <h5>No Other Nodes Found</h5>
-                            <p>This node is running standalone.</p>
-                            <small class="text-muted">
-                                To connect with other nodes:
-                                <br>1. Ensure other computers are on the same network
-                                <br>2. Run the application on those computers
-                                <br>3. Wait a few seconds for discovery
-                            </small>
-                        </div>
-                    `;
-                } else {
-                    for (const [peerId, peerInfo] of Object.entries(data.peers)) {
-                        const lastSeen = new Date(peerInfo.last_seen * 1000);
-                        const secondsAgo = Math.floor((Date.now() - lastSeen.getTime()) / 1000);
-                        const timeAgo = secondsAgo < 60 ? 'Just now' : 
-                                       secondsAgo < 3600 ? `${Math.floor(secondsAgo/60)} min ago` :
-                                       `${Math.floor(secondsAgo/3600)} hours ago`;
-                        
-                        html += `
-                            <div class="card mb-3">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div class="flex-grow-1">
-                                            <h5 class="card-title">
-                                                ${peerId}
-                                                <span class="badge bg-secondary">Peer</span>
-                                            </h5>
-                                            <p class="card-text mb-1">
-                                                <strong>IP:</strong> ${peerInfo.ip}<br>
-                                                <strong>Last Seen:</strong> ${timeAgo}<br>
-                                                <strong>Status:</strong> <span class="badge bg-success">Connected</span>
-                                            </p>
-                                            <div class="mt-2">
-                                                ${peerInfo.capabilities.text_extraction ? '<span class="badge bg-success me-1">Text</span>' : ''}
-                                                ${peerInfo.capabilities.file_processing ? '<span class="badge bg-info me-1">Files</span>' : ''}
-                                                ${peerInfo.capabilities.ocr ? '<span class="badge bg-warning me-1">OCR</span>' : ''}
-                                                ${peerInfo.capabilities.nlp ? '<span class="badge bg-primary me-1">NLP</span>' : ''}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }
-                }
-                
-                container.innerHTML = html;
-                
-                // Update node info
-                const thisNodeInfo = document.getElementById('thisNodeInfo');
-                thisNodeInfo.innerHTML = `
-                    <p class="mb-1"><strong>Node ID:</strong> ${data.node_id}</p>
-                    <p class="mb-1"><strong>IP Address:</strong> ${data.local_ip}</p>
-                    <p class="mb-1"><strong>Status:</strong> <span class="badge bg-success">Online</span></p>
-                    <p class="mb-0"><strong>Role:</strong> ${data.is_leader ? 'Leader' : 'Peer'}</p>
-                `;
-                
-                // Update network stats
-                const networkStats = document.getElementById('networkStats');
-                networkStats.innerHTML = `
-                    <p class="mb-1"><strong>Total Nodes:</strong> ${peerCount + 1}</p>
-                    <p class="mb-1"><strong>Connected Peers:</strong> ${peerCount}</p>
-                    <p class="mb-1"><strong>Leader:</strong> ${data.leader || data.node_id}</p>
-                    <p class="mb-0"><strong>Network:</strong> <span class="badge bg-success">Active</span></p>
-                `;
-                
-            } catch (error) {
-                console.error('Error loading nodes:', error);
-                document.getElementById('nodesContainer').innerHTML = 
-                    `<div class="alert alert-danger">
-                        <i class="fas fa-exclamation-circle"></i> Error loading node information: ${error.message}
-                        <br><small>Please check that the server is running.</small>
-                    </div>`;
-            }
+            });
+            html += '</div>';
+            container.innerHTML = html;
         }
 
-        // Refresh button
+        function updateJobTimeline(jobStatsData) {
+            const timeline = document.getElementById('jobTimeline');
+            const nodesWithStats = jobStatsData.nodes_with_stats || [];
+
+            // Simulate recent jobs (in real implementation, you'd track actual job completions)
+            if (nodesWithStats.length > 0 && recentJobs.length < 10) {
+                const node = nodesWithStats[0];
+                if (node.job_stats.last_active) {
+                    recentJobs.unshift({
+                        node: node.node_id,
+                        type: Object.keys(node.job_stats.job_types || {})[0] || 'unknown',
+                        time: new Date(node.job_stats.last_active * 1000),
+                        status: 'completed'
+                    });
+                    
+                    // Keep only last 10 jobs
+                    if (recentJobs.length > 10) recentJobs.pop();
+                }
+            }
+
+            if (recentJobs.length === 0) {
+                timeline.innerHTML = `
+                    <div class="text-center text-muted py-3">
+                        <i class="fas fa-clock fa-2x mb-2"></i>
+                        <p>No recent jobs</p>
+                    </div>
+                `;
+                return;
+            }
+
+            timeline.innerHTML = recentJobs.map(job => `
+                <div class="timeline-item">
+                    <div class="d-flex justify-content-between">
+                        <strong>${job.type}</strong>
+                        <small class="text-muted">${job.time.toLocaleTimeString()}</small>
+                    </div>
+                    <small>Node: ${job.node.substring(0, 15)}...</small>
+                    <span class="badge bg-success float-end">${job.status}</span>
+                </div>
+            `).join('');
+        }
+
+        function updatePerformanceMetrics(peersData, jobStatsData, systemStats) {
+            const container = document.getElementById('performanceMetrics');
+            const taskStats = systemStats.task_stats || {};
+
+            const metrics = {
+                'Network Efficiency': `${calculateNetworkEfficiency(jobStatsData)}%`,
+                'Task Success Rate': `${calculateSuccessRate(jobStatsData)}%`,
+                'Average Processing Time': '2.3s', // You would track this in your backend
+                'Peers Utilization': `${calculatePeerUtilization(peersData, taskStats)}%`,
+                'Queue Health': getQueueHealth(taskStats.pending_tasks || 0),
+                'Memory Usage': '45%' // You would track this in your backend
+            };
+
+            container.innerHTML = `
+                <div class="row">
+                    ${Object.entries(metrics).map(([metric, value]) => `
+                        <div class="col-md-4 mb-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <h5 class="card-title text-primary">${value}</h5>
+                                    <p class="card-text">${metric}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function calculateNetworkEfficiency(jobStatsData) {
+            const nodes = Object.values(jobStatsData.job_distribution || {});
+            if (nodes.length === 0) return 0;
+            
+            const avgEfficiency = nodes.reduce((sum, node) => 
+                sum + (node.completion_rate || 0), 0) / nodes.length;
+            return Math.round(avgEfficiency * 100);
+        }
+
+        function calculatePeerUtilization(peersData, taskStats) {
+            const totalPeers = Object.keys(peersData.peers || {}).length;
+            const activePeers = Object.values(taskStats.peer_load || {}).filter(load => load > 0).length;
+            return totalPeers > 0 ? Math.round((activePeers / totalPeers) * 100) : 0;
+        }
+
+        function getQueueHealth(pendingTasks) {
+            if (pendingTasks === 0) return 'Excellent';
+            if (pendingTasks < 5) return 'Good';
+            if (pendingTasks < 10) return 'Fair';
+            return 'Poor';
+        }
+
+        function updateLastUpdated() {
+            document.getElementById('lastUpdated').textContent = 
+                `Updated: ${new Date().toLocaleTimeString()}`;
+        }
+
+        function showError(message) {
+            const container = document.getElementById('nodesContainer');
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle"></i> ${message}
+                </div>
+            `;
+        }
+
+        // Event Listeners
         document.getElementById('refreshNodes').addEventListener('click', function() {
-            loadNodes();
             this.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
-            setTimeout(() => {
-                this.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
-            }, 1000);
+            loadNodes().finally(() => {
+                setTimeout(() => {
+                    this.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+                }, 1000);
+            });
         });
 
-        // Load nodes on page load
+        // Initialize
         loadNodes();
         
-        // Auto-refresh every 10 seconds
-        setInterval(loadNodes, 10000);
+        // Auto-refresh
+        setInterval(loadNodes, 5000);
+
+        // WebSocket for real-time updates (if you implement it)
+        const socket = new WebSocket(`ws://${window.location.host}/socket.io`);
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === 'job_completed') {
+                recentJobs.unshift({
+                    node: data.node_id,
+                    type: data.task_type,
+                    time: new Date(),
+                    status: 'completed'
+                });
+                loadNodes(); // Refresh all data
+            }
+        };
     </script>
 </body>
 </html>

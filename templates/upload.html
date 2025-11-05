@@ -7,55 +7,24 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        .file-preview {
-            max-height: 300px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            padding: 10px;
-        }
-        .file-item {
-            padding: 8px;
-            margin: 4px 0;
-            background: #f8f9fa;
-            border-radius: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .file-item:hover {
-            background: #e9ecef;
-        }
-        .drop-zone {
-            border: 2px dashed #0d6efd;
-            border-radius: 10px;
-            padding: 40px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        .drop-zone:hover {
-            background: #f8f9ff;
-            border-color: #0a58ca;
-        }
-        .drop-zone.dragover {
-            background: #e7f1ff;
-            border-color: #0a58ca;
-        }
-        .processing-status {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 350px;
-            z-index: 1000;
-        }
+        .file-preview { max-height: 300px; overflow-y: auto; border: 1px solid #ddd; border-radius: 5px; padding: 10px; }
+        .file-item { padding: 8px; margin: 4px 0; background: #f8f9fa; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+        .file-item:hover { background: #e9ecef; }
+        .drop-zone { border: 2px dashed #0d6efd; border-radius: 10px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
+        .drop-zone:hover { background: #f8f9ff; border-color: #0a58ca; }
+        .drop-zone.dragover { background: #e7f1ff; border-color: #0a58ca; }
+        .processing-status { position: fixed; bottom: 20px; right: 20px; width: 350px; z-index: 1000; }
+        .node-status { font-size: 0.8em; }
+        .distribution-visual { height: 200px; background: #f8f9fa; border-radius: 8px; position: relative; }
+        .task-flow { position: absolute; width: 100%; height: 100%; }
+        .task-node { position: absolute; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
             <a class="navbar-brand" href="/">
-                <i class="fas fa-network-wired"></i> DocProcessor
+                <i class="fas fa-network-wired"></i> DocProcessor Network
             </a>
             <div class="navbar-nav ms-auto">
                 <a class="nav-link" href="/">Dashboard</a>
@@ -67,6 +36,38 @@
     </nav>
 
     <div class="container mt-4">
+        <!-- Real-time Network Status -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fas fa-network-wired"></i> Live Network Status</h5>
+                        <span class="badge bg-light text-dark" id="networkStatus">Loading...</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row" id="networkStats">
+                            <div class="col-md-3 text-center">
+                                <h3 id="peerCount" class="text-primary">0</h3>
+                                <small>Active Peers</small>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <h3 id="taskCount" class="text-warning">0</h3>
+                                <small>Pending Tasks</small>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <h3 id="completedCount" class="text-success">0</h3>
+                                <small>Completed Jobs</small>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <h3 id="efficiency" class="text-info">0%</h3>
+                                <small>Network Efficiency</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Upload Mode Selection -->
         <div class="row mb-4">
             <div class="col-12">
@@ -92,17 +93,26 @@
                             <!-- Single File Upload -->
                             <div class="tab-pane fade show active" id="single" role="tabpanel">
                                 <div class="alert alert-info">
-                                    <i class="fas fa-info-circle"></i> Single file will be <strong>automatically distributed</strong> to the most suitable peer based on capabilities and load.
+                                    <i class="fas fa-info-circle"></i> 
+                                    <strong>Smart Distribution:</strong> File will be automatically routed to the most suitable peer based on capabilities, current load, and performance history.
                                 </div>
                                 
                                 <div class="drop-zone" id="singleDropZone">
                                     <i class="fas fa-cloud-upload-alt fa-3x mb-3 text-primary"></i>
                                     <h5>Drag & Drop File Here</h5>
-                                    <p class="text-muted">or click to browse</p>
+                                    <p class="text-muted">or click to browse (PDF, DOC, TXT, Images)</p>
                                     <input type="file" id="singleFileInput" class="d-none" accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png">
                                 </div>
                                 
                                 <div id="singleFilePreview" class="mt-3"></div>
+                                
+                                <div id="distributionPreview" class="mt-3 d-none">
+                                    <div class="alert alert-warning">
+                                        <i class="fas fa-route"></i>
+                                        <strong>Distribution Plan:</strong>
+                                        <span id="distributionPlan">Analyzing network...</span>
+                                    </div>
+                                </div>
                                 
                                 <button id="singleUploadBtn" class="btn btn-primary btn-lg mt-3 w-100" disabled>
                                     <i class="fas fa-upload"></i> Upload & Distribute
@@ -112,13 +122,14 @@
                             <!-- Batch Upload -->
                             <div class="tab-pane fade" id="batch" role="tabpanel">
                                 <div class="alert alert-warning">
-                                    <i class="fas fa-network-wired"></i> Batch files will be <strong>intelligently segmented and distributed</strong> across all available peers for parallel processing.
+                                    <i class="fas fa-network-wired"></i> 
+                                    <strong>Parallel Processing:</strong> Files will be intelligently segmented and distributed across all available peers for maximum parallel processing efficiency.
                                 </div>
                                 
                                 <div class="drop-zone" id="batchDropZone">
                                     <i class="fas fa-layer-group fa-3x mb-3 text-primary"></i>
                                     <h5>Drag & Drop Multiple Files Here</h5>
-                                    <p class="text-muted">or click to browse</p>
+                                    <p class="text-muted">or click to browse multiple files</p>
                                     <input type="file" id="batchFileInput" class="d-none" multiple accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png">
                                 </div>
                                 
@@ -129,7 +140,7 @@
                                         <i class="fas fa-network-wired"></i> Upload Batch & Auto-Distribute
                                     </button>
                                     <div class="text-center mt-2">
-                                        <small class="text-muted">Files will be processed in parallel across the network</small>
+                                        <small class="text-muted" id="batchInfo">Files will be processed in parallel across the network</small>
                                     </div>
                                 </div>
                             </div>
@@ -139,7 +150,7 @@
             </div>
         </div>
 
-        <!-- Load Distribution Visualization -->
+        <!-- Live Distribution Visualization -->
         <div class="row">
             <div class="col-12">
                 <div class="card">
@@ -151,11 +162,30 @@
                     </div>
                     <div class="card-body">
                         <div id="loadDistribution">
-                            <div class="text-center">
+                            <div class="text-center py-4">
                                 <div class="spinner-border" role="status">
-                                    <span class="visually-hidden">Loading...</span>
+                                    <span class="visually-hidden">Loading network status...</span>
                                 </div>
-                                <p class="mt-2">Loading network status...</p>
+                                <p class="mt-2">Analyzing network load...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-history"></i> Recent Distribution Activity</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="recentActivity">
+                            <div class="text-center text-muted py-3">
+                                <i class="fas fa-clock fa-2x mb-2"></i>
+                                <p>No recent activity</p>
                             </div>
                         </div>
                     </div>
@@ -173,35 +203,302 @@
     <script>
         let selectedSingleFile = null;
         let selectedBatchFiles = [];
+        let recentActivities = [];
+        let networkStats = {};
 
-        // Single file upload handlers
-        const singleDropZone = document.getElementById('singleDropZone');
-        const singleFileInput = document.getElementById('singleFileInput');
-        const singleUploadBtn = document.getElementById('singleUploadBtn');
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            loadNetworkStats();
+            setupEventListeners();
+            setInterval(loadNetworkStats, 3000);
+        });
 
-        singleDropZone.addEventListener('click', () => singleFileInput.click());
-        singleDropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            singleDropZone.classList.add('dragover');
-        });
-        singleDropZone.addEventListener('dragleave', () => {
-            singleDropZone.classList.remove('dragover');
-        });
-        singleDropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            singleDropZone.classList.remove('dragover');
-            if (e.dataTransfer.files.length > 0) {
-                selectedSingleFile = e.dataTransfer.files[0];
-                displaySingleFile();
+        async function loadNetworkStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                networkStats = data;
+                updateNetworkStatus(data);
+                updateLoadDistribution(data);
+            } catch (error) {
+                console.error('Error loading network stats:', error);
             }
-        });
-        singleFileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                selectedSingleFile = e.target.files[0];
-                displaySingleFile();
-            }
-        });
+        }
 
+        function updateNetworkStatus(data) {
+            const peerStats = data.peer_stats || {};
+            const taskStats = data.task_stats || {};
+            
+            document.getElementById('peerCount').textContent = peerStats.total_peers || 0;
+            document.getElementById('taskCount').textContent = taskStats.pending_tasks || 0;
+            document.getElementById('completedCount').textContent = taskStats.completed_tasks || 0;
+            
+            // Calculate efficiency
+            const totalTasks = (taskStats.completed_tasks || 0) + (taskStats.failed_tasks || 0) + (taskStats.pending_tasks || 0);
+            const efficiency = totalTasks > 0 ? Math.round((taskStats.completed_tasks / totalTasks) * 100) : 0;
+            document.getElementById('efficiency').textContent = efficiency + '%';
+            
+            // Update network status badge
+            const statusBadge = document.getElementById('networkStatus');
+            if (efficiency >= 80) {
+                statusBadge.className = 'badge bg-success';
+                statusBadge.textContent = 'Optimal';
+            } else if (efficiency >= 60) {
+                statusBadge.className = 'badge bg-warning';
+                statusBadge.textContent = 'Good';
+            } else {
+                statusBadge.className = 'badge bg-danger';
+                statusBadge.textContent = 'Needs Attention';
+            }
+        }
+
+        function setupEventListeners() {
+            // Single file handlers
+            setupSingleFileUpload();
+            setupBatchFileUpload();
+        }
+
+        function setupSingleFileUpload() {
+            const singleDropZone = document.getElementById('singleDropZone');
+            const singleFileInput = document.getElementById('singleFileInput');
+            const singleUploadBtn = document.getElementById('singleUploadBtn');
+
+            singleDropZone.addEventListener('click', () => singleFileInput.click());
+            singleDropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                singleDropZone.classList.add('dragover');
+            });
+            singleDropZone.addEventListener('dragleave', () => {
+                singleDropZone.classList.remove('dragover');
+            });
+            singleDropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                singleDropZone.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    selectedSingleFile = e.dataTransfer.files[0];
+                    displaySingleFile();
+                    analyzeDistribution(selectedSingleFile);
+                }
+            });
+            singleFileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    selectedSingleFile = e.target.files[0];
+                    displaySingleFile();
+                    analyzeDistribution(selectedSingleFile);
+                }
+            });
+
+            singleUploadBtn.addEventListener('click', uploadSingleFile);
+        }
+
+        function analyzeDistribution(file) {
+            const distributionPlan = document.getElementById('distributionPlan');
+            const distributionPreview = document.getElementById('distributionPreview');
+            
+            // Simulate analysis based on file type and network state
+            const fileExt = file.name.split('.').pop().toLowerCase();
+            let taskType = 'text_extraction';
+            if (['.jpg', '.jpeg', '.png'].includes(fileExt)) taskType = 'ocr';
+            
+            const peerCount = networkStats.peer_stats?.total_peers || 0;
+            let plan = '';
+            
+            if (peerCount === 0) {
+                plan = 'No peers available - will process locally';
+            } else {
+                const bestPeer = findBestPeerForTask(taskType);
+                if (bestPeer) {
+                    plan = `Will distribute to ${bestPeer.id.substring(0, 15)}... (${taskType})`;
+                } else {
+                    plan = 'No suitable peers found - will process locally';
+                }
+            }
+            
+            distributionPlan.textContent = plan;
+            distributionPreview.classList.remove('d-none');
+        }
+
+        function findBestPeerForTask(taskType) {
+            // This is a simplified version - your backend does the real work
+            const taskStats = networkStats.task_stats || {};
+            const peerLoad = taskStats.peer_load || {};
+            
+            // Find peer with lowest load (simplified)
+            const peers = Object.keys(peerLoad);
+            if (peers.length === 0) return null;
+            
+            return {
+                id: peers[0],
+                load: peerLoad[peers[0]]
+            };
+        }
+
+        async function uploadSingleFile() {
+            if (!selectedSingleFile) return;
+            
+            showProcessingToast('Analyzing network and distributing file...', 'info');
+            singleUploadBtn.disabled = true;
+            singleUploadBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Distributing...';
+            
+            const formData = new FormData();
+            formData.append('file', selectedSingleFile);
+            
+            try {
+                const startTime = Date.now();
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                const processingTime = Date.now() - startTime;
+                
+                if (result.success) {
+                    const message = `File distributed to ${result.processed_by} in ${processingTime}ms`;
+                    showProcessingToast(message, 'success');
+                    addRecentActivity({
+                        file: selectedSingleFile.name,
+                        node: result.processed_by,
+                        strategy: result.strategy,
+                        time: processingTime,
+                        status: 'success'
+                    });
+                    clearSingleFile();
+                    loadNetworkStats();
+                } else {
+                    showProcessingToast(`Error: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                showProcessingToast(`Upload failed: ${error.message}`, 'danger');
+            } finally {
+                singleUploadBtn.disabled = false;
+                singleUploadBtn.innerHTML = '<i class="fas fa-upload"></i> Upload & Distribute';
+            }
+        }
+
+        // Batch upload functions (similar structure)
+        function setupBatchFileUpload() {
+            const batchDropZone = document.getElementById('batchDropZone');
+            const batchFileInput = document.getElementById('batchFileInput');
+            const batchUploadBtn = document.getElementById('batchUploadBtn');
+
+            batchDropZone.addEventListener('click', () => batchFileInput.click());
+            batchDropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                batchDropZone.classList.add('dragover');
+            });
+            batchDropZone.addEventListener('dragleave', () => {
+                batchDropZone.classList.remove('dragover');
+            });
+            batchDropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                batchDropZone.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    selectedBatchFiles = Array.from(e.dataTransfer.files);
+                    displayBatchFiles();
+                }
+            });
+            batchFileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    selectedBatchFiles = Array.from(e.target.files);
+                    displayBatchFiles();
+                }
+            });
+
+            batchUploadBtn.addEventListener('click', uploadBatchFiles);
+        }
+
+        async function uploadBatchFiles() {
+            if (selectedBatchFiles.length === 0) return;
+            
+            showProcessingToast(`Distributing ${selectedBatchFiles.length} files across network...`, 'info');
+            batchUploadBtn.disabled = true;
+            batchUploadBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Distributing...';
+            
+            const formData = new FormData();
+            selectedBatchFiles.forEach(file => {
+                formData.append('files', file);
+            });
+            
+            try {
+                const startTime = Date.now();
+                const response = await fetch('/api/upload-batch', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                const processingTime = Date.now() - startTime;
+                
+                if (result.success) {
+                    const message = `${result.total_tasks} tasks distributed in ${processingTime}ms`;
+                    showProcessingToast(message, 'success');
+                    addRecentActivity({
+                        files: selectedBatchFiles.length,
+                        tasks: result.total_tasks,
+                        time: processingTime,
+                        status: 'success'
+                    });
+                    selectedBatchFiles = [];
+                    document.getElementById('batchFilePreview').classList.add('d-none');
+                    batchFileInput.value = '';
+                    loadNetworkStats();
+                } else {
+                    showProcessingToast(`Error: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                showProcessingToast(`Batch upload failed: ${error.message}`, 'danger');
+            } finally {
+                batchUploadBtn.disabled = false;
+                batchUploadBtn.innerHTML = '<i class="fas fa-network-wired"></i> Upload Batch & Auto-Distribute';
+            }
+        }
+
+        function addRecentActivity(activity) {
+            recentActivities.unshift({
+                ...activity,
+                timestamp: new Date()
+            });
+            
+            // Keep only last 10 activities
+            if (recentActivities.length > 10) {
+                recentActivities.pop();
+            }
+            
+            updateRecentActivity();
+        }
+
+        function updateRecentActivity() {
+            const container = document.getElementById('recentActivity');
+            
+            if (recentActivities.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted py-3">
+                        <i class="fas fa-clock fa-2x mb-2"></i>
+                        <p>No recent activity</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = recentActivities.map(activity => `
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-2">
+                    <div>
+                        <strong>${activity.file || `${activity.files} files`}</strong>
+                        <br>
+                        <small class="text-muted">
+                            ${activity.node ? `Node: ${activity.node}` : ''}
+                            ${activity.tasks ? `Tasks: ${activity.tasks}` : ''}
+                        </small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge bg-success">${activity.time}ms</span>
+                        <br>
+                        <small class="text-muted">${activity.timestamp.toLocaleTimeString()}</small>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Display functions (similar to your existing ones)
         function displaySingleFile() {
             const preview = document.getElementById('singleFilePreview');
             const fileSize = (selectedSingleFile.size / 1024).toFixed(2);
@@ -209,7 +506,6 @@
             
             let taskType = 'text_extraction';
             if (['.jpg', '.jpeg', '.png'].includes(fileExt)) taskType = 'ocr';
-            else if (fileExt === '.pdf') taskType = 'text_extraction + ocr';
             
             preview.innerHTML = `
                 <div class="alert alert-success">
@@ -224,43 +520,8 @@
                     </div>
                 </div>
             `;
-            singleUploadBtn.disabled = false;
+            document.getElementById('singleUploadBtn').disabled = false;
         }
-
-        function clearSingleFile() {
-            selectedSingleFile = null;
-            document.getElementById('singleFilePreview').innerHTML = '';
-            singleUploadBtn.disabled = true;
-            singleFileInput.value = '';
-        }
-
-        // Batch file upload handlers
-        const batchDropZone = document.getElementById('batchDropZone');
-        const batchFileInput = document.getElementById('batchFileInput');
-        const batchUploadBtn = document.getElementById('batchUploadBtn');
-
-        batchDropZone.addEventListener('click', () => batchFileInput.click());
-        batchDropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            batchDropZone.classList.add('dragover');
-        });
-        batchDropZone.addEventListener('dragleave', () => {
-            batchDropZone.classList.remove('dragover');
-        });
-        batchDropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            batchDropZone.classList.remove('dragover');
-            if (e.dataTransfer.files.length > 0) {
-                selectedBatchFiles = Array.from(e.dataTransfer.files);
-                displayBatchFiles();
-            }
-        });
-        batchFileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                selectedBatchFiles = Array.from(e.target.files);
-                displayBatchFiles();
-            }
-        });
 
         function displayBatchFiles() {
             const preview = document.getElementById('batchFilePreview');
@@ -282,95 +543,49 @@
                 `;
             });
             preview.innerHTML = html;
-            batchUploadBtn.disabled = false;
+            document.getElementById('batchUploadBtn').disabled = false;
+            
+            // Update batch info
+            document.getElementById('batchInfo').textContent = 
+                `${selectedBatchFiles.length} files ready for parallel distribution`;
+        }
+
+        function clearSingleFile() {
+            selectedSingleFile = null;
+            document.getElementById('singleFilePreview').innerHTML = '';
+            document.getElementById('singleUploadBtn').disabled = true;
+            document.getElementById('singleFileInput').value = '';
+            document.getElementById('distributionPreview').classList.add('d-none');
         }
 
         function removeBatchFile(index) {
             selectedBatchFiles.splice(index, 1);
             if (selectedBatchFiles.length === 0) {
                 document.getElementById('batchFilePreview').classList.add('d-none');
-                batchUploadBtn.disabled = true;
-                batchFileInput.value = '';
+                document.getElementById('batchUploadBtn').disabled = true;
+                document.getElementById('batchFileInput').value = '';
             } else {
                 displayBatchFiles();
             }
         }
 
-        // Upload handlers
-        singleUploadBtn.addEventListener('click', async () => {
-            if (!selectedSingleFile) return;
-            
-            showProcessingToast('Uploading file and finding best peer...', 'info');
-            singleUploadBtn.disabled = true;
-            
-            const formData = new FormData();
-            formData.append('file', selectedSingleFile);
-            
-            try {
-                const response = await fetch('/api/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
-                
-                if (result.success) {
-                    showProcessingToast(`File distributed to ${result.processed_by}!`, 'success');
-                    clearSingleFile();
-                    refreshLoadStats();
-                } else {
-                    showProcessingToast(`Error: ${result.error}`, 'danger');
-                    singleUploadBtn.disabled = false;
-                }
-            } catch (error) {
-                showProcessingToast(`Upload failed: ${error.message}`, 'danger');
-                singleUploadBtn.disabled = false;
-            }
-        });
-
-        batchUploadBtn.addEventListener('click', async () => {
-            if (selectedBatchFiles.length === 0) return;
-            
-            showProcessingToast(`Distributing ${selectedBatchFiles.length} files across network...`, 'info');
-            batchUploadBtn.disabled = true;
-            
-            const formData = new FormData();
-            selectedBatchFiles.forEach(file => {
-                formData.append('files', file);
-            });
-            
-            try {
-                const response = await fetch('/api/upload-batch', {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
-                
-                if (result.success) {
-                    showProcessingToast(`${result.total_tasks} tasks distributed successfully!`, 'success');
-                    selectedBatchFiles = [];
-                    document.getElementById('batchFilePreview').classList.add('d-none');
-                    batchFileInput.value = '';
-                    refreshLoadStats();
-                } else {
-                    showProcessingToast(`Error: ${result.error}`, 'danger');
-                }
-            } catch (error) {
-                showProcessingToast(`Batch upload failed: ${error.message}`, 'danger');
-            } finally {
-                batchUploadBtn.disabled = false;
-            }
-        });
-
         function showProcessingToast(message, type) {
             const toastContainer = document.getElementById('processingToast');
             const toastId = 'toast-' + Date.now();
+            
+            const icon = {
+                'success': 'check-circle',
+                'danger': 'exclamation-circle',
+                'info': 'info-circle',
+                'warning': 'exclamation-triangle'
+            }[type] || 'info-circle';
             
             const toast = `
                 <div id="${toastId}" class="toast show mb-2" role="alert">
                     <div class="toast-header bg-${type} text-white">
                         <strong class="me-auto">
-                            <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'danger' ? 'exclamation-circle' : 'info-circle'}"></i>
-                            ${type === 'success' ? 'Success' : type === 'danger' ? 'Error' : 'Processing'}
+                            <i class="fas fa-${icon}"></i>
+                            ${type.charAt(0).toUpperCase() + type.slice(1)}
                         </strong>
                         <button type="button" class="btn-close btn-close-white" onclick="document.getElementById('${toastId}').remove()"></button>
                     </div>
@@ -387,78 +602,82 @@
         }
 
         async function refreshLoadStats() {
+            await loadNetworkStats();
+            showProcessingToast('Network stats refreshed', 'info');
+        }
+
+        function updateLoadDistribution(data) {
             const container = document.getElementById('loadDistribution');
+            const taskStats = data.task_stats || {};
+            const peerLoad = taskStats.peer_load || {};
             
-            try {
-                const response = await fetch('/api/stats');
-                const data = await response.json();
+            let html = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Network Overview</h6>
+                        <p><strong>Total Nodes:</strong> ${(data.peer_stats?.total_peers || 0) + 1}</p>
+                        <p><strong>Active Tasks:</strong> ${taskStats.pending_tasks || 0}</p>
+                        <p><strong>Completed Tasks:</strong> ${taskStats.completed_tasks || 0}</p>
+                        <p><strong>Success Rate:</strong> ${calculateSuccessRate(taskStats)}%</p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Current Load Distribution</h6>
+            `;
+            
+            // This node (coordinator)
+            html += `
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between">
+                        <span><i class="fas fa-server text-primary"></i> This Node (Coordinator)</span>
+                        <span class="badge bg-secondary">0 tasks</span>
+                    </div>
+                    <div class="progress mt-1" style="height: 20px;">
+                        <div class="progress-bar bg-secondary" style="width: 0%">0%</div>
+                    </div>
+                </div>
+            `;
+            
+            // Peer nodes
+            const maxLoad = Math.max(...Object.values(peerLoad), 1);
+            for (const [peerId, load] of Object.entries(peerLoad)) {
+                const percentage = (load / maxLoad) * 100;
+                const shortId = peerId.substring(0, 15) + '...';
+                const loadColor = load > 5 ? 'danger' : load > 2 ? 'warning' : 'success';
                 
-                const peerStats = data.peer_stats || {};
-                const taskStats = data.task_stats || {};
-                const peerLoad = taskStats.peer_load || {};
-                
-                let html = `
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h6>Network Overview</h6>
-                            <p><strong>Total Nodes:</strong> ${(peerStats.total_peers || 0) + 1}</p>
-                            <p><strong>Active Tasks:</strong> ${taskStats.pending_tasks || 0}</p>
-                            <p><strong>Completed Tasks:</strong> ${taskStats.completed_tasks || 0}</p>
-                        </div>
-                        <div class="col-md-6">
-                            <h6>Current Load Distribution</h6>
-                `;
-                
-                // Show this node
                 html += `
                     <div class="mb-2">
                         <div class="d-flex justify-content-between">
-                            <span><i class="fas fa-server text-primary"></i> This Node</span>
-                            <span class="badge bg-success">0 tasks</span>
+                            <span><i class="fas fa-server text-info"></i> ${shortId}</span>
+                            <span class="badge bg-${loadColor}">${load} tasks</span>
                         </div>
                         <div class="progress mt-1" style="height: 20px;">
-                            <div class="progress-bar" style="width: 0%">0%</div>
+                            <div class="progress-bar bg-${loadColor}" style="width: ${percentage}%">
+                                ${load} task${load !== 1 ? 's' : ''}
+                            </div>
                         </div>
                     </div>
                 `;
-                
-                // Show peer loads
-                const maxLoad = Math.max(...Object.values(peerLoad), 1);
-                for (const [peerId, load] of Object.entries(peerLoad)) {
-                    const percentage = (load / maxLoad) * 100;
-                    const shortId = peerId.substring(0, 20) + '...';
-                    html += `
-                        <div class="mb-2">
-                            <div class="d-flex justify-content-between">
-                                <span><i class="fas fa-server text-info"></i> ${shortId}</span>
-                                <span class="badge bg-${load > 5 ? 'danger' : load > 2 ? 'warning' : 'success'}">${load} tasks</span>
-                            </div>
-                            <div class="progress mt-1" style="height: 20px;">
-                                <div class="progress-bar bg-${load > 5 ? 'danger' : load > 2 ? 'warning' : 'info'}" 
-                                     style="width: ${percentage}%">${load}</div>
-                            </div>
-                        </div>
-                    `;
-                }
-                
-                if (Object.keys(peerLoad).length === 0) {
-                    html += '<p class="text-muted">No peers connected. Tasks will be processed locally.</p>';
-                }
-                
-                html += `
-                        </div>
-                    </div>
-                `;
-                
-                container.innerHTML = html;
-            } catch (error) {
-                container.innerHTML = `<div class="alert alert-danger">Failed to load network stats: ${error.message}</div>`;
             }
+            
+            if (Object.keys(peerLoad).length === 0) {
+                html += '<p class="text-muted">No active peer nodes</p>';
+            }
+            
+            html += `
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = html;
         }
 
-        // Auto-refresh load stats
-        setInterval(refreshLoadStats, 5000);
-        refreshLoadStats();
+        function calculateSuccessRate(taskStats) {
+            const total = (taskStats.completed_tasks || 0) + (taskStats.failed_tasks || 0);
+            return total > 0 ? Math.round((taskStats.completed_tasks / total) * 100) : 0;
+        }
+
+        // Initialize recent activities
+        updateRecentActivity();
     </script>
 </body>
 </html>
