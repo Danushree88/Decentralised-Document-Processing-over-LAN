@@ -1,98 +1,144 @@
-import socket
-
-def get_local_ip():
-    """Get local IP address"""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-    except:
-        try:
-            hostname = socket.gethostname()
-            ip = socket.gethostbyname(hostname)
-            if not ip.startswith('127.'):
-                return ip
-        except:
-            pass
-        return '127.0.0.1'
+# config.py - FIXED with instance support
+import os
 
 class Config:
-    # Folders
+    """Configuration for specialized document processing nodes"""
+    
+    # Node specialization
+    NODE_TYPE = None  # 'PDF' or 'TXT'
+    
+    # Network configuration - BASE ports
+    BROADCAST_PORT = 8888
+    BASE_TASK_PORT = 8889
+    BASE_FILE_PORT = 8890
+    
+    # Actual ports (will be calculated based on instance)
+    TASK_PORT = None
+    FILE_PORT = None
+    
+    BROADCAST_ADDR = "255.255.255.255"
+    HEARTBEAT_INTERVAL = 5  # seconds
+    TASK_TIMEOUT = 30  # seconds
+    
+    # File handling
     UPLOAD_FOLDER = 'uploads'
     PROCESSED_FOLDER = 'processed'
     INDEX_FOLDER = 'search_index'
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
     
-    # Network Configuration
-    BROADCAST_PORT = 8888
-    TASK_PORT = 8889
-    FILE_PORT = 8890
-    BROADCAST_ADDR = "255.255.255.255"
-    HEARTBEAT_INTERVAL = 5
-    TASK_TIMEOUT = 60  # Increased from 30 to 60 seconds
+    # Capabilities (will be set by specialization)
+    CAPABILITIES = {}
     
-    # File settings
-    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-    
-    # Node Capabilities
-    CAPABILITIES = {
-        'ocr': False,
-        'text_extraction': True,
-        'nlp': False,
-        'summarization': False,
-        'keyword_extraction': True,
-        'entity_recognition': False,
-        'topic_modeling': False,
-        'file_processing': True
-    }
-    
-    # File type mappings for task segmentation
+    # File type to task mapping
     FILE_TYPE_TASKS = {
-        '.pdf': ['text_extraction', 'keyword_extraction'],
-        '.doc': ['text_extraction', 'keyword_extraction'],
-        '.docx': ['text_extraction', 'keyword_extraction'],
-        '.txt': ['text_extraction', 'keyword_extraction'],
-        '.jpg': ['ocr', 'keyword_extraction'],
-        '.png': ['ocr', 'keyword_extraction'],
-        '.jpeg': ['ocr', 'keyword_extraction']
+        '.pdf': ['pdf_processing'],
+        '.txt': ['txt_processing', 'keyword_extraction'],
+        '.doc': ['text_extraction'],
+        '.docx': ['text_extraction'],
+        '.jpg': ['ocr'],
+        '.jpeg': ['ocr'],
+        '.png': ['ocr']
     }
     
     @classmethod
-    def detect_capabilities(cls):
-        """Detect what this node can do"""
-        capabilities = cls.CAPABILITIES.copy()
+    def configure_as_pdf_node(cls, instance=0):
+        """
+        Configure as PDF specialist node
         
-        # Detect OCR
-        try:
-            import pytesseract
-            capabilities['ocr'] = True
-            print("OCR capability detected")
-        except ImportError:
-            capabilities['ocr'] = False
-            print("OCR not available")
+        Args:
+            instance: Instance number for port allocation (0, 1, 2, ...)
+                     - Instance 0: ports 8889, 8890
+                     - Instance 1: ports 8899, 8900
+                     - Instance 2: ports 8909, 8910
+        """
+        cls.NODE_TYPE = 'PDF'
         
-        # Detect NLP
-        try:
-            import spacy
-            capabilities['nlp'] = True
-            capabilities['entity_recognition'] = True
-            print("NLP capabilities detected")
-        except ImportError:
-            capabilities['nlp'] = False
-            capabilities['entity_recognition'] = False
-            print("NLP not available")
+        # Calculate unique ports based on instance
+        cls.TASK_PORT = cls.BASE_TASK_PORT + (instance * 10)
+        cls.FILE_PORT = cls.BASE_FILE_PORT + (instance * 10)
         
-        try:
-            import nltk
-            capabilities['summarization'] = True
-            print("Summarization capability detected")
-        except ImportError:
-            capabilities['summarization'] = False
+        # Set PDF-only capabilities
+        cls.CAPABILITIES = {
+            'pdf_processing': True,
+            'txt_processing': False,
+            'text_extraction': False,
+            'keyword_extraction': False,
+            'ocr': False,
+            'nlp': False,
+            'summarization': False,
+            'entity_recognition': False,
+            'topic_modeling': False,
+            'file_processing': False
+        }
         
-        # Always available
-        capabilities['text_extraction'] = True
-        capabilities['keyword_extraction'] = True
-        capabilities['file_processing'] = True
+        # Update folder names to avoid conflicts
+        if instance > 0:
+            cls.UPLOAD_FOLDER = f'uploads_pdf_{instance}'
+            cls.PROCESSED_FOLDER = f'processed_pdf_{instance}'
+            cls.INDEX_FOLDER = f'search_index_pdf_{instance}'
+        else:
+            cls.UPLOAD_FOLDER = 'uploads_pdf'
+            cls.PROCESSED_FOLDER = 'processed_pdf'
+            cls.INDEX_FOLDER = 'search_index_pdf'
         
-        cls.CAPABILITIES = capabilities
-        print(f"Detected capabilities: {[k for k, v in capabilities.items() if v]}")
-        return capabilities
+        print(f"🔴 Configured as PDF NODE (Instance {instance})")
+        print(f"   Task Port: {cls.TASK_PORT}")
+        print(f"   File Port: {cls.FILE_PORT}")
+        print(f"   Upload Folder: {cls.UPLOAD_FOLDER}")
+    
+    @classmethod
+    def configure_as_txt_node(cls, instance=0):
+        """
+        Configure as TXT specialist node
+        
+        Args:
+            instance: Instance number for port allocation (0, 1, 2, ...)
+                     - Instance 0: ports 8890, 8891
+                     - Instance 1: ports 8900, 8901
+                     - Instance 2: ports 8910, 8911
+        """
+        cls.NODE_TYPE = 'TXT'
+        
+        # Calculate unique ports based on instance (offset by 1 from PDF)
+        cls.TASK_PORT = cls.BASE_TASK_PORT + (instance * 10) + 1
+        cls.FILE_PORT = cls.BASE_FILE_PORT + (instance * 10) + 1
+        
+        # Set TXT-only capabilities
+        cls.CAPABILITIES = {
+            'pdf_processing': False,
+            'txt_processing': True,
+            'text_extraction': True,
+            'keyword_extraction': True,
+            'ocr': False,
+            'nlp': False,
+            'summarization': False,
+            'entity_recognition': False,
+            'topic_modeling': False,
+            'file_processing': False
+        }
+        
+        # Update folder names to avoid conflicts
+        if instance > 0:
+            cls.UPLOAD_FOLDER = f'uploads_txt_{instance}'
+            cls.PROCESSED_FOLDER = f'processed_txt_{instance}'
+            cls.INDEX_FOLDER = f'search_index_txt_{instance}'
+        else:
+            cls.UPLOAD_FOLDER = 'uploads_txt'
+            cls.PROCESSED_FOLDER = 'processed_txt'
+            cls.INDEX_FOLDER = 'search_index_txt'
+        
+        print(f"🔵 Configured as TXT NODE (Instance {instance})")
+        print(f"   Task Port: {cls.TASK_PORT}")
+        print(f"   File Port: {cls.FILE_PORT}")
+        print(f"   Upload Folder: {cls.UPLOAD_FOLDER}")
+    
+    @classmethod
+    def get_node_info(cls):
+        """Get current node configuration info"""
+        return {
+            'node_type': cls.NODE_TYPE,
+            'task_port': cls.TASK_PORT,
+            'file_port': cls.FILE_PORT,
+            'capabilities': cls.CAPABILITIES,
+            'upload_folder': cls.UPLOAD_FOLDER
+        }

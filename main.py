@@ -1,4 +1,4 @@
-
+import argparse
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
 import os
@@ -8,6 +8,21 @@ import logging
 import threading
 import socket
 import sys
+
+# Parse all command line arguments at once
+parser = argparse.ArgumentParser(description='Start a specialized document processing node')
+parser.add_argument('--type', choices=['pdf', 'txt'], required=True, 
+                   help='Node specialization type: pdf or txt')
+parser.add_argument('--instance', type=int, default=0,
+                   help='Instance number for port allocation')
+args = parser.parse_args()
+
+# Configure node based on command line arguments
+from config import Config
+if args.type == 'pdf':
+    Config.configure_as_pdf_node(args.instance)
+elif args.type == 'txt':
+    Config.configure_as_txt_node(args.instance)
 
 # Windows-compatible logging (no emojis)
 logging.basicConfig(
@@ -123,8 +138,9 @@ except Exception as e:
                 'total_words': sum(len(doc['content'].split()) for doc in self.documents)
             }
     search_index = FallbackSearchIndex()
+# Find this section in your app.py and replace it:
 
-# Initialize Document Processor
+# Initialize Document Processor FIRST
 try:
     from document_processor import DocumentProcessor
     document_processor = DocumentProcessor()
@@ -134,6 +150,10 @@ except Exception as e:
     logger.error(f"Document Processor failed: {e}")
     # Fallback
     class FallbackDocumentProcessor:
+        def __init__(self):
+            self.node_type = Config.NODE_TYPE
+            logger.info(f"Fallback processor as {self.node_type} node")
+            
         def process_task(self, file_path, task_type='full'):
             import os
             from datetime import datetime
@@ -167,10 +187,10 @@ except Exception as e:
 # Create temporary node_id for TaskManager
 temp_node_id = f"local_{get_local_ip()}_{int(time.time())}"
 
-# Initialize TaskManager BEFORE PeerNode
+# Initialize TaskManager with document_processor
 try:
     from task_manager import TaskManager
-    task_manager = TaskManager(temp_node_id, search_index)
+    task_manager = TaskManager(temp_node_id, search_index, document_processor)
     components['task_manager'] = True
     logger.info("Task Manager initialized successfully")
 except Exception as e:
@@ -178,23 +198,24 @@ except Exception as e:
     import traceback
     logger.error(traceback.format_exc())
     
-    # Fallback TaskManager with ALL required attributes
+    # Fallback TaskManager with document_processor
     class FallbackTaskManager:
-        def __init__(self, node_id, search_index):
+        def __init__(self, node_id, search_index, document_processor=None):
             self.node_id = node_id
             self.search_index = search_index
+            self.document_processor = document_processor
             self.peer_load = {}
-            self.pending_tasks = {}  # Dict not int
+            self.pending_tasks = {}
             self.completed_tasks = 0
             self.peer_capabilities = {}
-            self.lock = threading.Lock()  # CRITICAL - Must have lock!
+            self.lock = threading.Lock()
             logger.info("Using fallback task manager")
         
         def distribute_task(self, file_path, task_type='full'):
             try:
                 logger.info(f"Fallback: Processing {os.path.basename(file_path)} locally")
-                # Process locally as fallback
-                result = document_processor.process_task(file_path, task_type)
+                # Process locally using the document_processor
+                result = self.document_processor.process_task(file_path, task_type)
                 if result['success']:
                     file_id = str(uuid.uuid4())
                     self.search_index.add_document(
@@ -250,7 +271,7 @@ except Exception as e:
                     del self.peer_load[peer_id]
                 logger.info(f"Fallback: Removed peer {peer_id[:15]}...")
     
-    task_manager = FallbackTaskManager(temp_node_id, search_index)
+    task_manager = FallbackTaskManager(temp_node_id, search_index, document_processor)
 
 # Initialize PeerNode LAST with TaskManager reference
 try:
@@ -843,6 +864,149 @@ def debug_info():
         'timestamp': time.time()
     })
 
+
+@app.route('/api/debug/discovery')
+def debug_discovery():
+    """Comprehensive peer discovery debugging"""
+    try:
+        # Get current node info
+        node_info = {
+            'node_id': peer_node.node_id,
+            'node_type': Config.NODE_TYPE,
+            'local_ip': peer_node.local_ip,
+            'capabilities': Config.CAPABILITIES
+        }
+        
+        # Get all peers
+        peers = peer_node.get_peers()
+        
+        # Get task manager's view of peers
+        task_mgr_peers = {}
+        if hasattr(task_manager, 'peer_capabilities'):
+            with task_manager.lock:
+                task_mgr_peers = dict(task_manager.peer_capabilities)
+        
+        # Analyze capability matching
+        peer_analysis = []
+        for peer_id, peer_info in peers.items():
+            analysis = {
+                'peer_id': peer_id[:30] + '...' if len(peer_id) > 30 else peer_id,
+                'ip': peer_info.get('ip'),
+                'node_type': peer_info.get('node_type', 'UNKNOWN'),
+                'capabilities': peer_info.get('capabilities', {}),
+                'can_process_pdf': peer_info.get('pdf_processing', False),
+                'can_process_txt': peer_info.get('txt_processing', False),
+                'last_seen_ago': time.time() - peer_info.get('last_seen', 0),
+                'in_task_manager': peer_id in task_mgr_peers
+            }
+            peer_analysis.append(analysis)
+        
+        # Check network connectivity
+        network_info = {
+            'broadcast_port': Config.BROADCAST_PORT,
+            'task_port': Config.TASK_PORT,
+            'file_port': Config.FILE_PORT,
+            'broadcast_addr': Config.BROADCAST_ADDR
+        }
+        
+        return jsonify({
+            'status': 'ok',
+            'node': node_info,
+            'peers_discovered': len(peers),
+            'peers_in_task_manager': len(task_mgr_peers),
+            'peer_analysis': peer_analysis,
+            'network_config': network_info,
+            'timestamp': time.time()
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug discovery error: {e}")
+        import traceback
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/debug/task-distribution')
+def debug_task_distribution():
+    """Debug task distribution logic"""
+    try:
+        # Check what files are uploaded
+        uploaded_files = []
+        if os.path.exists(app.config['UPLOAD_FOLDER']):
+            for filename in os.listdir(app.config['UPLOAD_FOLDER']):
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                if os.path.isfile(file_path):
+                    file_ext = os.path.splitext(filename)[1].lower()
+                    uploaded_files.append({
+                        'name': filename,
+                        'extension': file_ext,
+                        'size': os.path.getsize(file_path),
+                        'required_task': 'pdf_processing' if file_ext == '.pdf' else 'txt_processing'
+                    })
+        
+        # Get suitable peers for each task type
+        pdf_peers = []
+        txt_peers = []
+        
+        if hasattr(task_manager, '_find_suitable_peers'):
+            pdf_peers = task_manager._find_suitable_peers('pdf_processing')
+            txt_peers = task_manager._find_suitable_peers('txt_processing')
+        
+        return jsonify({
+            'status': 'ok',
+            'uploaded_files': uploaded_files,
+            'pdf_specialists': len(pdf_peers),
+            'txt_specialists': len(txt_peers),
+            'pdf_peers': [{'id': p['id'][:30], 'ip': p['ip'], 'load': p['load']} for p in pdf_peers],
+            'txt_peers': [{'id': p['id'][:30], 'ip': p['ip'], 'load': p['load']} for p in txt_peers],
+            'timestamp': time.time()
+        })
+        
+    except Exception as e:
+        logger.error(f"Task distribution debug error: {e}")
+        import traceback
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/test-broadcast')
+def test_broadcast():
+    """Test if broadcast is working"""
+    try:
+        # Create a test announcement
+        announcement = {
+            'test': True,
+            'node_id': peer_node.node_id,
+            'node_type': Config.NODE_TYPE,
+            'ip': peer_node.local_ip,
+            'timestamp': time.time()
+        }
+        
+        # Try to broadcast
+        message = json.dumps(announcement).encode('utf-8')
+        peer_node.broadcast_socket.sendto(
+            message,
+            (Config.BROADCAST_ADDR, Config.BROADCAST_PORT)
+        )
+        
+        return jsonify({
+            'status': 'broadcast_sent',
+            'message': 'Test broadcast sent successfully',
+            'announcement': announcement
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+    
 @app.route('/api/debug/status')
 def debug_status():
     """Comprehensive debug information"""

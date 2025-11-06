@@ -1,0 +1,4 @@
+ Thepaper isdevotedtoalocalheatkernel,whichisaspecialpartof thestandardheatkernel.
+ Localitymeansthatall considerationsareproducedinanopenconvexsetofasmoothRiemannian
+ manifold.Westudysuchpropertiesandconceptsasuniqueness,asymmetryof theSeeley–DeWitt
+ coefficients,extensiononthewholemanifold,afamilyo
