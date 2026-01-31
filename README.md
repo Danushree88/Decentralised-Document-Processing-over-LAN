@@ -30,55 +30,66 @@ A **distributed document processing platform** that intelligently routes uploade
 - Enables fast document search for research use cases
 
 ---
-
 ## 🏗️ System Architecture
 
 The system follows a decentralized, peer-to-peer architecture where each node can act as both a coordinator and a worker.
 
 ### Architecture Flow
 
-+----------------+
-| Client |
-| (Web Browser) |
-+--------+-------+
-|
-| Upload Document
-v
+```text
 +----------------------+
-| Coordinator Node |
-| (Flask Application) |
+|        Client        |
+|    (Web Browser)     |
 +----------+-----------+
-|
-| Task Assignment
-v
+           |
+           | Upload Document
+           v
 +----------------------+
-| Task Manager |
-| (Load & Capability |
-| Based Routing) |
+|   Coordinator Node   |
+| (Flask Application)  |
 +----------+-----------+
-|
-| Distributed Tasks
-v
+           |
+           | Task Assignment
+           v
++----------------------+
+|     Task Manager     |
+| (Load & Capability   |
+|   Based Routing)     |
++----------+-----------+
+           |
+           | Distributed Tasks
+           v
 +-------------------------------+
+|   Specialized Peer Nodes      |
+|-------------------------------|
+|   PDF Node   |   TXT Node     |
+|   (PDF)      | (Text +        |
+|              |  Keywords)     |
++-------------------------------+
+           |
+           | Processing Results
+           v
++----------------------+
+|     Search Index     |
+|  (Text & Keywords)  |
++----------+-----------+
+           |
+           | Search Queries
+           v
++----------------------+
+|      Client UI       |
+| (Search & Dashboard) |
++----------------------+
+```
 
-Specialized Peer Nodes
-PDF Node
-(PDF)
-+-------------------------------+
-       |
-       | Processing Results
-       v
-+----------------------+
-| Search Index |
-| (Text & Keywords) |
-+----------+-----------+
-|
-| Search Queries
-v
-+----------------------+
-| Client UI |
-| (Search & Dashboard)|
-+----------------------+
+### Key Architectural Highlights
+
+- Decentralized P2P design with no single point of failure
+- Capability-based routing to specialized nodes
+- Load-aware task distribution
+- Automatic fallback to local processing
+- Real-time monitoring via WebSockets
+
 
 ---
 
